@@ -19,8 +19,7 @@ export interface Tip {
   amount: number;
   guardId: string;
   guardName: string;
-  customerId?: string;
-  customerName?: string;
+  paymentMethod?: string; // SnapScan, Zapper, Bank App, etc.
   timestamp: string;
   location: string;
   locationId?: string;
@@ -35,12 +34,6 @@ export interface Payout {
   status: 'Issued' | 'Redeemed' | 'Expired';
 }
 
-export interface Customer {
-  id: string;
-  name: string;
-  email: string;
-  walletBalance: number;
-}
 
 export interface Location {
   id: string;
@@ -59,15 +52,14 @@ export interface Manager {
   guardsCount: number;
 }
 
-// Update Transaction interface to include managerId
+// Transaction interface for all financial movements
 export interface Transaction {
   id: string;
   type: 'tip' | 'withdrawal' | 'purchase' | 'deposit' | 'fee' | 'refund' | 'airtime' | 'electricity' | 'payout';
   amount: number;
   guardId?: string;
   guardName?: string;
-  customerId?: string;
-  customerName?: string;
+  paymentMethod?: string; // For tips - SnapScan, Zapper, Bank App
   managerId?: string;
   timestamp: string;
   location?: string;
@@ -126,37 +118,15 @@ export const mockCarGuards: CarGuard[] = [
   }
 ];
 
-// Mock Customers
-export const mockCustomers: Customer[] = [
-  {
-    id: 'c1',
-    name: 'Sarah Johnson',
-    email: 'sarah.j@example.com',
-    walletBalance: 150.00
-  },
-  {
-    id: 'c2',
-    name: 'David Smith',
-    email: 'david.s@example.com',
-    walletBalance: 75.50
-  },
-  {
-    id: 'c3',
-    name: 'Emma Williams',
-    email: 'emma.w@example.com',
-    walletBalance: 200.25
-  }
-];
 
-// Mock Tips
+// Mock Tips (from QR code scans via payment apps)
 export const mockTips: Tip[] = [
   {
     id: 't1',
     amount: 20.00,
     guardId: 'g1',
     guardName: 'John Mokoena',
-    customerId: 'c1',
-    customerName: 'Sarah Johnson',
+    paymentMethod: 'SnapScan',
     timestamp: '2025-05-21T09:30:00',
     location: 'Mall of Africa - Entrance 3',
     locationId: 'l1'
@@ -166,8 +136,7 @@ export const mockTips: Tip[] = [
     amount: 15.50,
     guardId: 'g1',
     guardName: 'John Mokoena',
-    customerId: 'c2',
-    customerName: 'David Smith',
+    paymentMethod: 'Zapper',
     timestamp: '2025-05-21T11:45:00',
     location: 'Mall of Africa - Entrance 3',
     locationId: 'l1'
@@ -177,8 +146,7 @@ export const mockTips: Tip[] = [
     amount: 10.00,
     guardId: 'g2',
     guardName: 'Sipho Ndlovu',
-    customerId: 'c3',
-    customerName: 'Emma Williams',
+    paymentMethod: 'FNB App',
     timestamp: '2025-05-21T14:15:00',
     location: 'Sandton City - Parking Level 2',
     locationId: 'l2'
@@ -188,8 +156,7 @@ export const mockTips: Tip[] = [
     amount: 25.00,
     guardId: 'g3',
     guardName: 'Michael Khumalo',
-    customerId: 'c1',
-    customerName: 'Sarah Johnson',
+    paymentMethod: 'SnapScan',
     timestamp: '2025-05-20T16:30:00',
     location: 'Eastgate Mall - Main Entrance',
     locationId: 'l3'
@@ -199,8 +166,7 @@ export const mockTips: Tip[] = [
     amount: 5.25,
     guardId: 'g1',
     guardName: 'John Mokoena',
-    customerId: 'c3',
-    customerName: 'Emma Williams',
+    paymentMethod: 'Standard Bank App',
     timestamp: '2025-05-20T10:20:00',
     location: 'Mall of Africa - Entrance 3',
     locationId: 'l1'
@@ -290,19 +256,18 @@ export const mockManagers: Manager[] = [
 
 // Mock Transactions to include all transaction types
 export const mockTransactions: Transaction[] = [
-  // Tips (inflows)
+  // Tips (inflows from QR code scans)
   {
     id: 'tr1',
     type: 'tip',
     amount: 20.00,
     guardId: 'g1',
     guardName: 'John Mokoena',
-    customerId: 'c1',
-    customerName: 'Sarah Johnson',
+    paymentMethod: 'SnapScan',
     timestamp: '2025-05-21T09:30:00',
     location: 'Mall of Africa - Entrance 3',
     locationId: 'l1',
-    description: 'Tip received from Sarah Johnson'
+    description: 'Tip received via SnapScan'
   },
   {
     id: 'tr2',
@@ -310,12 +275,11 @@ export const mockTransactions: Transaction[] = [
     amount: 15.50,
     guardId: 'g1',
     guardName: 'John Mokoena',
-    customerId: 'c2',
-    customerName: 'David Smith',
+    paymentMethod: 'Zapper',
     timestamp: '2025-05-21T11:45:00',
     location: 'Mall of Africa - Entrance 3',
     locationId: 'l1',
-    description: 'Tip received from David Smith'
+    description: 'Tip received via Zapper'
   },
   // Payouts (outflows)
   {
@@ -404,10 +368,6 @@ export const getTipsByGuardId = (guardId: string): Tip[] => {
   return mockTips.filter(tip => tip.guardId === guardId);
 };
 
-// Helper function to get tips for a specific customer
-export const getTipsByCustomerId = (customerId: string): Tip[] => {
-  return mockTips.filter(tip => tip.customerId === customerId);
-};
 
 // Helper function to get payouts for a specific guard
 export const getPayoutsByGuardId = (guardId: string): Payout[] => {

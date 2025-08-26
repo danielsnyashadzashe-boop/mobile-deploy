@@ -16,15 +16,6 @@ import CarGuardHistory from "./pages/car-guard/CarGuardHistory";
 import CarGuardPayouts from "./pages/car-guard/CarGuardPayouts";
 import CarGuardProfile from "./pages/car-guard/CarGuardProfile";
 
-// Customer Portal
-import CustomerPortal from "./pages/customer/CustomerPortal";
-import CustomerLogin from "./pages/customer/CustomerLogin";
-import CustomerRegister from "./pages/customer/CustomerRegister";
-import CustomerDashboard from "./pages/customer/CustomerDashboard";
-import CustomerTipping from "./pages/customer/CustomerTipping";
-import CustomerHistory from "./pages/customer/CustomerHistory";
-import CustomerProfile from "./pages/customer/CustomerProfile";
-
 // Admin Application
 import AdminApp from "./pages/admin/AdminApp";
 import AdminLogin from "./pages/admin/AdminLogin";
@@ -60,16 +51,6 @@ const App = () => (
             <Route path="history" element={<CarGuardHistory />} />
             <Route path="payouts" element={<CarGuardPayouts />} />
             <Route path="profile" element={<CarGuardProfile />} />
-          </Route>
-          
-          {/* Customer Portal Routes */}
-          <Route path="/customer" element={<CustomerPortal />}>
-            <Route index element={<CustomerLogin />} />
-            <Route path="register" element={<CustomerRegister />} />
-            <Route path="dashboard" element={<CustomerDashboard />} />
-            <Route path="tip/:guardId" element={<CustomerTipping />} />
-            <Route path="history" element={<CustomerHistory />} />
-            <Route path="profile" element={<CustomerProfile />} />
           </Route>
           
           {/* Admin Application Routes */}

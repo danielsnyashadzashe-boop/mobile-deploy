@@ -47,8 +47,8 @@ const CarGuardHistory = () => {
                   </div>
                   <div className="text-sm text-right">
                     <div className="text-nogada-neutral">Tip #{tip.id}</div>
-                    {tip.customerName && (
-                      <div className="text-xs text-gray-500">From: {tip.customerName}</div>
+                    {tip.paymentMethod && (
+                      <div className="text-xs text-gray-500">Via: {tip.paymentMethod}</div>
                     )}
                   </div>
                 </div>

@@ -19,7 +19,7 @@ const AdminTransactions = () => {
   const filteredTransactions = mockTransactions.filter(transaction => {
     const matchesSearch = 
       (transaction.guardName && transaction.guardName.toLowerCase().includes(searchTerm.toLowerCase())) || 
-      (transaction.customerName && transaction.customerName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (transaction.paymentMethod && transaction.paymentMethod.toLowerCase().includes(searchTerm.toLowerCase())) ||
       transaction.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       transaction.description.toLowerCase().includes(searchTerm.toLowerCase());
     
@@ -185,7 +185,7 @@ const AdminTransactions = () => {
                 <th className="text-left py-3 px-4 font-medium text-gray-500">Type</th>
                 <th className="text-left py-3 px-4 font-medium text-gray-500">Description</th>
                 <th className="text-left py-3 px-4 font-medium text-gray-500">Guard</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-500">Customer</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-500">Payment Method</th>
                 <th className="text-left py-3 px-4 font-medium text-gray-500">Reference</th>
                 <th className="text-right py-3 px-4 font-medium text-gray-500">Amount</th>
               </tr>
@@ -205,7 +205,7 @@ const AdminTransactions = () => {
                     </td>
                     <td className="py-3 px-4">{transaction.description}</td>
                     <td className="py-3 px-4">{transaction.guardName || 'N/A'}</td>
-                    <td className="py-3 px-4">{transaction.customerName || 'N/A'}</td>
+                    <td className="py-3 px-4">{transaction.paymentMethod || 'N/A'}</td>
                     <td className="py-3 px-4">{transaction.reference || 'N/A'}</td>
                     <td className={`py-3 px-4 text-right font-medium ${style.amountClass}`}>
                       {formatCurrency(Math.abs(transaction.amount))}

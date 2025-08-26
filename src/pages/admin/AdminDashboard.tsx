@@ -386,10 +386,10 @@ const AdminDashboard = () => {
                     <div className="text-sm font-medium">Location:</div>
                     <div>{transaction.location || 'N/A'}</div>
                     
-                    {'customerName' in transaction && (
+                    {'paymentMethod' in transaction && (
                       <>
-                        <div className="text-sm font-medium">Customer:</div>
-                        <div>{transaction.customerName || 'Anonymous'}</div>
+                        <div className="text-sm font-medium">Payment Method:</div>
+                        <div>{transaction.paymentMethod || 'Unknown'}</div>
                       </>
                     )}
                     
