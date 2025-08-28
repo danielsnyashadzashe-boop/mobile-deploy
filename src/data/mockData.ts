@@ -52,6 +52,26 @@ export interface Manager {
   guardsCount: number;
 }
 
+export interface PendingRegistration {
+  id: string;
+  fullName: string;
+  idNumber: string;
+  phoneNumber: string;
+  email?: string;
+  preferredLocation: string;
+  preferredLocationName?: string;
+  bankName?: string;
+  accountNumber?: string;
+  accountType?: string;
+  branchCode?: string;
+  submittedAt: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  assignedGuardId?: string;
+}
+
 // Transaction interface for all financial movements
 export interface Transaction {
   id: string;
@@ -314,6 +334,65 @@ export const mockTransactions: Transaction[] = [
     timestamp: '2025-05-20T09:15:00',
     description: 'Eskom Prepaid Electricity',
     reference: 'EL-34567'
+  }
+];
+
+// Mock Pending Registrations
+export const mockPendingRegistrations: PendingRegistration[] = [
+  {
+    id: 'reg1',
+    fullName: 'Thabo Dlamini',
+    idNumber: '9005125800084',
+    phoneNumber: '072 234 5678',
+    email: 'thabo.d@gmail.com',
+    preferredLocation: 'l1',
+    preferredLocationName: 'Mall of Africa',
+    bankName: 'FNB',
+    accountNumber: '62734567890',
+    accountType: 'savings',
+    branchCode: '250655',
+    submittedAt: '2025-05-26T10:30:00',
+    status: 'pending'
+  },
+  {
+    id: 'reg2',
+    fullName: 'Bongani Nkosi',
+    idNumber: '8807156789084',
+    phoneNumber: '083 345 6789',
+    preferredLocation: 'l2',
+    preferredLocationName: 'Sandton City',
+    submittedAt: '2025-05-26T09:15:00',
+    status: 'pending'
+  },
+  {
+    id: 'reg3',
+    fullName: 'Lerato Mbatha',
+    idNumber: '9203045678084',
+    phoneNumber: '071 456 7890',
+    email: 'lerato.m@yahoo.com',
+    preferredLocation: 'l3',
+    preferredLocationName: 'Eastgate Mall',
+    bankName: 'Capitec',
+    accountNumber: '1234567890',
+    accountType: 'savings',
+    submittedAt: '2025-05-25T14:20:00',
+    status: 'approved',
+    reviewedBy: 'Admin',
+    reviewedAt: '2025-05-25T16:45:00',
+    assignedGuardId: 'NG004'
+  },
+  {
+    id: 'reg4',
+    fullName: 'Sibusiso Zulu',
+    idNumber: '8506125800084',
+    phoneNumber: '060 567 8901',
+    preferredLocation: 'l1',
+    preferredLocationName: 'Mall of Africa',
+    submittedAt: '2025-05-24T11:00:00',
+    status: 'rejected',
+    reviewedBy: 'Admin',
+    reviewedAt: '2025-05-24T15:30:00',
+    rejectionReason: 'Invalid ID number provided'
   }
 ];
 

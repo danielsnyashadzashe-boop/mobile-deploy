@@ -11,6 +11,7 @@ import NotFound from "./pages/NotFound";
 // Car Guard App
 import CarGuardApp from "./pages/car-guard/CarGuardApp";
 import CarGuardLogin from "./pages/car-guard/CarGuardLogin";
+import CarGuardRegister from "./pages/car-guard/CarGuardRegister";
 import CarGuardDashboard from "./pages/car-guard/CarGuardDashboard";
 import CarGuardHistory from "./pages/car-guard/CarGuardHistory";
 import CarGuardPayouts from "./pages/car-guard/CarGuardPayouts";
@@ -26,6 +27,7 @@ import AdminTransactions from "./pages/admin/AdminTransactions";
 import AdminReports from "./pages/admin/AdminReports";
 import AdminLocations from "./pages/admin/AdminLocations";
 import AdminPayouts from "./pages/admin/AdminPayouts";
+import AdminRegistrations from "./pages/admin/AdminRegistrations";
 import AdminAdministration from "./pages/admin/AdminAdministration";
 import AdminRoles from "./pages/admin/AdminRoles";
 import AdminUsers from "./pages/admin/AdminUsers";
@@ -47,6 +49,7 @@ const App = () => (
           {/* Car Guard App Routes */}
           <Route path="/car-guard" element={<CarGuardApp />}>
             <Route index element={<CarGuardLogin />} />
+            <Route path="register" element={<CarGuardRegister />} />
             <Route path="dashboard" element={<CarGuardDashboard />} />
             <Route path="history" element={<CarGuardHistory />} />
             <Route path="payouts" element={<CarGuardPayouts />} />
@@ -60,6 +63,7 @@ const App = () => (
             <Route path="locations" element={<AdminLocations />} />
             <Route path="managers" element={<AdminManagers />} />
             <Route path="guards" element={<AdminGuards />} />
+            <Route path="registrations" element={<AdminRegistrations />} />
             <Route path="payouts" element={<AdminPayouts />} />
             <Route path="transactions" element={<AdminTransactions />} />
             <Route path="reports" element={<AdminReports />} />

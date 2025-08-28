@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { mockCarGuards } from '@/data/mockData';
 
 const CarGuardLogin = () => {
@@ -74,14 +74,23 @@ const CarGuardLogin = () => {
         </button>
       </form>
       
-      <p className="text-xs text-center text-gray-500 mt-6">
+      <div className="mt-6 text-center border-t pt-4">
+        <p className="text-sm text-gray-600 mb-2">
+          Don't have an account?
+        </p>
+        <Link to="/car-guard/register" className="text-sm nogada-link font-semibold">
+          Apply to become a Car Guard
+        </Link>
+      </div>
+      
+      <p className="text-xs text-center text-gray-500 mt-4">
         Contact your Nogada administrator if you need assistance.
       </p>
       
-      <div className="mt-8 text-center">
-        <a href="/" className="text-sm nogada-link">
+      <div className="mt-6 text-center">
+        <Link to="/" className="text-sm nogada-link">
           Return to App Selection
-        </a>
+        </Link>
       </div>
     </div>
   );

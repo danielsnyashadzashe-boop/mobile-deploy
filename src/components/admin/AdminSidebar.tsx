@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Users, Clock, BarChart, UserPlus, MapPin, CreditCard, Shield } from 'lucide-react';
+import { Home, Users, Clock, BarChart, UserPlus, MapPin, CreditCard, Shield, UserCheck } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -70,6 +70,15 @@ const AdminSidebar = () => {
                   <NavLink to="/admin/guards" className={getNavCls}>
                     <Users className="mr-2 h-4 w-4" />
                     {!collapsed && <span>Car Guards</span>}
+                  </NavLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <NavLink to="/admin/registrations" className={getNavCls}>
+                    <UserCheck className="mr-2 h-4 w-4" />
+                    {!collapsed && <span>Registrations</span>}
                   </NavLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>
