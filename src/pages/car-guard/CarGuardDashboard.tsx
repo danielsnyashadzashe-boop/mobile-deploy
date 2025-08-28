@@ -1,33 +1,13 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import BottomNavigation from '@/components/car-guard/BottomNavigation';
 import QRCodeDisplay from '@/components/car-guard/QRCodeDisplay';
+import AirtimePurchaseModal from '@/components/car-guard/AirtimePurchaseModal';
+import ElectricityPurchaseModal from '@/components/car-guard/ElectricityPurchaseModal';
 import { mockCarGuards, mockTips, formatCurrency, formatTime, mockTransactions } from '@/data/mockData';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Zap, Bolt } from 'lucide-react';
 import { toast } from 'sonner';
-import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
-import { useForm } from 'react-hook-form';
-import { z } from 'zod';
-import { zodResolver } from '@hookform/resolvers/zod';
-
-const airtimeSchema = z.object({
-  network: z.string().min(1, "Please select a network"),
-  phoneNumber: z.string().min(10, "Please enter a valid phone number"),
-  amount: z.string().min(1, "Please enter an amount"),
-});
-
-const electricitySchema = z.object({
-  meterNumber: z.string().min(11, "Please enter a valid meter number"),
-  amount: z.string().min(1, "Please enter an amount"),
-});
-
-type AirtimeFormValues = z.infer<typeof airtimeSchema>;
-type ElectricityFormValues = z.infer<typeof electricitySchema>;
 
 const CarGuardDashboard = () => {
   // Using the first mock guard as the logged-in guard
@@ -52,40 +32,30 @@ const CarGuardDashboard = () => {
   // States for service dialogs
   const [isAirtimeDialogOpen, setIsAirtimeDialogOpen] = useState(false);
   const [isElectricityDialogOpen, setIsElectricityDialogOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   
-  // Form setup for airtime
-  const airtimeForm = useForm<AirtimeFormValues>({
-    resolver: zodResolver(airtimeSchema),
-    defaultValues: {
-      network: '',
-      phoneNumber: '',
-      amount: '',
-    },
-  });
-
-  // Form setup for electricity
-  const electricityForm = useForm<ElectricityFormValues>({
-    resolver: zodResolver(electricitySchema),
-    defaultValues: {
-      meterNumber: '',
-      amount: '',
-    },
-  });
-
-  const handleAirtimePurchase = (data: AirtimeFormValues) => {
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+  
+  const handleAirtimePurchase = (data: any) => {
     // In a real app, this would call an API to purchase airtime
     console.log('Airtime purchase:', data);
-    toast.success(`R${data.amount} airtime purchased successfully`);
+    toast.success(`R${data.amount} airtime purchased successfully for ${data.phoneNumber}`);
     setIsAirtimeDialogOpen(false);
-    airtimeForm.reset();
   };
 
-  const handleElectricityPurchase = (data: ElectricityFormValues) => {
+  const handleElectricityPurchase = (data: any) => {
     // In a real app, this would call an API to purchase electricity
     console.log('Electricity purchase:', data);
-    toast.success(`R${data.amount} electricity purchased successfully`);
+    toast.success(`R${data.amount} electricity token purchased successfully. Token will be sent via SMS.`);
     setIsElectricityDialogOpen(false);
-    electricityForm.reset();
   };
   
   return (
@@ -201,150 +171,23 @@ const CarGuardDashboard = () => {
         </div>
       </div>
       
-      {/* Airtime Purchase Dialog */}
-      <Dialog open={isAirtimeDialogOpen} onOpenChange={setIsAirtimeDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Buy Airtime</DialogTitle>
-          </DialogHeader>
-          <Form {...airtimeForm}>
-            <form onSubmit={airtimeForm.handleSubmit(handleAirtimePurchase)} className="space-y-4">
-              <FormField
-                control={airtimeForm.control}
-                name="network"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Network</FormLabel>
-                    <Select 
-                      onValueChange={field.onChange} 
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a network" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="vodacom">Vodacom</SelectItem>
-                        <SelectItem value="mtn">MTN</SelectItem>
-                        <SelectItem value="cellc">Cell C</SelectItem>
-                        <SelectItem value="telkom">Telkom</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={airtimeForm.control}
-                name="phoneNumber"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Phone Number</FormLabel>
-                    <FormControl>
-                      <Input placeholder="071 234 5678" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={airtimeForm.control}
-                name="amount"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Amount (R)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        placeholder="50" 
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <div className="text-sm text-gray-500 mt-2">
-                Available Balance: {formatCurrency(guard.balance)}
-              </div>
-              
-              <DialogFooter>
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => setIsAirtimeDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit">Purchase Airtime</Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
+      {/* Mobile-Optimized Airtime Purchase Modal */}
+      <AirtimePurchaseModal
+        isOpen={isAirtimeDialogOpen}
+        onClose={() => setIsAirtimeDialogOpen(false)}
+        onPurchase={handleAirtimePurchase}
+        balance={guard.balance}
+        isMobile={isMobile}
+      />
       
-      {/* Electricity Purchase Dialog */}
-      <Dialog open={isElectricityDialogOpen} onOpenChange={setIsElectricityDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Buy Electricity</DialogTitle>
-          </DialogHeader>
-          <Form {...electricityForm}>
-            <form onSubmit={electricityForm.handleSubmit(handleElectricityPurchase)} className="space-y-4">
-              <FormField
-                control={electricityForm.control}
-                name="meterNumber"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Meter Number</FormLabel>
-                    <FormControl>
-                      <Input placeholder="01234567891" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={electricityForm.control}
-                name="amount"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Amount (R)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        placeholder="100" 
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <div className="text-sm text-gray-500 mt-2">
-                Available Balance: {formatCurrency(guard.balance)}
-              </div>
-              
-              <DialogFooter>
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => setIsElectricityDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit">Purchase Electricity</Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
+      {/* Mobile-Optimized Electricity Purchase Modal */}
+      <ElectricityPurchaseModal
+        isOpen={isElectricityDialogOpen}
+        onClose={() => setIsElectricityDialogOpen(false)}
+        onPurchase={handleElectricityPurchase}
+        balance={guard.balance}
+        isMobile={isMobile}
+      />
       
       <BottomNavigation />
     </div>
