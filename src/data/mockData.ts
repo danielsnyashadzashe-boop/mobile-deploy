@@ -31,7 +31,7 @@ export interface Payout {
   amount: number;
   voucherCode: string;
   issueDate: string;
-  status: 'Issued' | 'Redeemed' | 'Expired';
+  status: 'Issued' | 'Redeemed' | 'Expired' | 'Pending';
 }
 
 
@@ -195,8 +195,90 @@ export const mockTips: Tip[] = [
 
 // Mock Payouts
 export const mockPayouts: Payout[] = [
+  // Recent payouts for g1 (current guard)
   {
     id: 'p1',
+    guardId: 'g1',
+    amount: 150.00,
+    voucherCode: 'VC-98765',
+    issueDate: '2025-08-28T14:30:00',
+    status: 'Pending'
+  },
+  {
+    id: 'p2',
+    guardId: 'g1',
+    amount: 100.00,
+    voucherCode: 'VC-12346',
+    issueDate: '2025-08-25T12:00:00',
+    status: 'Issued'
+  },
+  {
+    id: 'p3',
+    guardId: 'g1',
+    amount: 200.00,
+    voucherCode: 'VC-55432',
+    issueDate: '2025-08-20T16:45:00',
+    status: 'Redeemed'
+  },
+  {
+    id: 'p4',
+    guardId: 'g1',
+    amount: 75.00,
+    voucherCode: 'VC-77889',
+    issueDate: '2025-08-15T09:30:00',
+    status: 'Redeemed'
+  },
+  {
+    id: 'p5',
+    guardId: 'g1',
+    amount: 125.00,
+    voucherCode: 'VC-44321',
+    issueDate: '2025-08-10T11:15:00',
+    status: 'Expired'
+  },
+  {
+    id: 'p6',
+    guardId: 'g1',
+    amount: 180.00,
+    voucherCode: 'VC-99100',
+    issueDate: '2025-08-05T13:20:00',
+    status: 'Redeemed'
+  },
+  {
+    id: 'p7',
+    guardId: 'g1',
+    amount: 100.00,
+    voucherCode: 'VC-66677',
+    issueDate: '2025-07-30T10:00:00',
+    status: 'Issued'
+  },
+  {
+    id: 'p8',
+    guardId: 'g1',
+    amount: 90.00,
+    voucherCode: 'VC-33445',
+    issueDate: '2025-07-25T15:45:00',
+    status: 'Redeemed'
+  },
+  {
+    id: 'p9',
+    guardId: 'g1',
+    amount: 250.00,
+    voucherCode: 'VC-11223',
+    issueDate: '2025-07-15T08:30:00',
+    status: 'Redeemed'
+  },
+  {
+    id: 'p10',
+    guardId: 'g1',
+    amount: 300.00,
+    voucherCode: 'VC-88999',
+    issueDate: '2025-07-01T12:00:00',
+    status: 'Redeemed'
+  },
+  // Other guards' payouts
+  {
+    id: 'p11',
     guardId: 'g2',
     amount: 100.00,
     voucherCode: 'VC-12345',
@@ -204,20 +286,12 @@ export const mockPayouts: Payout[] = [
     status: 'Redeemed'
   },
   {
-    id: 'p2',
-    guardId: 'g1',
-    amount: 100.00,
-    voucherCode: 'VC-12346',
-    issueDate: '2025-05-15T12:00:00',
-    status: 'Redeemed'
-  },
-  {
-    id: 'p3',
+    id: 'p12',
     guardId: 'g3',
     amount: 100.00,
     voucherCode: 'VC-12347',
     issueDate: '2025-05-10T12:00:00',
-    status: 'Expired'
+    status: 'Issued'
   }
 ];
 
