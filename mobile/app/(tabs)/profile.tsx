@@ -48,10 +48,10 @@ export default function ProfileScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
+    <SafeAreaView className="flex-1 bg-gray-50" edges={['top', 'left', 'right']}>
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <View className="bg-white px-4 py-4 border-b border-gray-100 flex-row justify-between items-center">
+        <View className="bg-white px-4 py-5 border-b border-gray-100 flex-row justify-between items-center">
           <Text className="text-2xl font-bold text-gray-900">Profile</Text>
           <TouchableOpacity
             onPress={() => isEditing ? handleSave() : setIsEditing(true)}

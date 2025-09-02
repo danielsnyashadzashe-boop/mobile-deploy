@@ -11,8 +11,8 @@ export default function TabLayout() {
           backgroundColor: '#ffffff',
           borderTopWidth: 1,
           borderTopColor: '#e5e7eb',
-          height: 60,
-          paddingBottom: 8,
+          height: 90, // Increased height for better iOS bottom safe area
+          paddingBottom: 34, // More space for iOS home indicator
           paddingTop: 8,
         },
         tabBarActiveTintColor: '#10B981',

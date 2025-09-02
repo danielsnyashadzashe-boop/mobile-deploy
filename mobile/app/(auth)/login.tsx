@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { TippaLogo } from '../../components/TippaLogo';
 
 export default function LoginScreen() {
   const [guardId, setGuardId] = useState('');
@@ -38,10 +39,10 @@ export default function LoginScreen() {
           <View className="flex-1 px-6 py-8">
             {/* Logo Section */}
             <View className="items-center mb-8">
-              <View className="w-20 h-20 bg-tippa-500 rounded-full items-center justify-center mb-4">
-                <Text className="text-white text-2xl font-bold">TG</Text>
+              <View className="mb-4">
+                <TippaLogo size={80} />
               </View>
-              <Text className="text-2xl font-bold text-gray-900">Tippa Guard</Text>
+              <Text className="text-2xl font-bold text-gray-900">Car Guard Login</Text>
               <Text className="text-gray-600 mt-2">Welcome back!</Text>
             </View>
 

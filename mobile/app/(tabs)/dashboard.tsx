@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,18 +7,29 @@ import {
   RefreshControl,
   Modal,
   Alert,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import { captureRef } from 'react-native-view-shot';
 import { mockCarGuard, mockTransactions, formatCurrency } from '../../data/mockData';
+import { TippaLogo } from '../../components/TippaLogo';
 
 export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showAirtimeModal, setShowAirtimeModal] = useState(false);
   const [showElectricityModal, setShowElectricityModal] = useState(false);
+  const [downloadingQR, setDownloadingQR] = useState(false);
+  const [airtimeAmount, setAirtimeAmount] = useState('');
+  const [electricityAmount, setElectricityAmount] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [meterNumber, setMeterNumber] = useState('');
+  const qrViewRef = useRef(null);
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
@@ -26,6 +37,78 @@ export default function DashboardScreen() {
       setRefreshing(false);
     }, 2000);
   }, []);
+
+  const downloadQRCode = async () => {
+    if (!qrViewRef.current) {
+      Alert.alert('Error', 'QR code not ready. Please try again.');
+      return;
+    }
+    
+    try {
+      setDownloadingQR(true);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      // Add a small delay to ensure QR code is fully rendered
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Capture QR code at 300 DPI for high-quality printing
+      // 300 DPI = ~1181 pixels for 4-inch print size
+      const uri = await captureRef(qrViewRef.current, {
+        format: 'png',
+        quality: 1.0, // Maximum quality
+        width: 1181,  // 300 DPI equivalent for ~4 inch print
+        height: 1181,
+        result: 'tmpfile', // Use tmpfile for better compatibility
+      });
+
+      // Create filename with guard info
+      const guardName = mockCarGuard.name.replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `TippaQR_${guardName}_${mockCarGuard.id}_300DPI.png`;
+      const downloadPath = `${FileSystem.documentDirectory}${filename}`;
+
+      // Copy to permanent location (use copyAsync instead of moveAsync)
+      await FileSystem.copyAsync({
+        from: uri,
+        to: downloadPath,
+      });
+
+      // Clean up temp file
+      try {
+        await FileSystem.deleteAsync(uri, { idempotent: true });
+      } catch (cleanupError) {
+        console.log('Temp file cleanup failed:', cleanupError);
+      }
+
+      // Share the high-quality QR code
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(downloadPath, {
+          mimeType: 'image/png',
+          dialogTitle: 'Save QR Code for Printing (300 DPI)',
+        });
+        
+        Alert.alert(
+          'Success!', 
+          'QR Code ready for download!\n\nOptimized for 300 DPI printing - perfect for high-quality prints.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Success!', 
+          `QR Code saved as:\n${filename}\n\nOptimized for 300 DPI printing`,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error downloading QR code:', error);
+      Alert.alert(
+        'Download Error', 
+        `Failed to save QR code: ${error.message || 'Unknown error'}\n\nPlease try again or contact support if the issue persists.`,
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setDownloadingQR(false);
+    }
+  };
 
   const handleQuickAction = (action: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -49,29 +132,97 @@ export default function DashboardScreen() {
   const recentTransactions = mockTransactions.slice(0, 3);
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
+    <SafeAreaView className="flex-1 bg-gray-50" edges={['top', 'left', 'right']}>
       <ScrollView
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ flexGrow: 1 }}
       >
-        {/* Header */}
+        {/* Header with Logo */}
         <LinearGradient
           colors={['#10B981', '#059669']}
           className="px-6 pt-4 pb-8"
         >
-          <View className="flex-row justify-between items-center mb-4">
-            <View>
-              <Text className="text-white/80 text-sm">Welcome back,</Text>
-              <Text className="text-white text-2xl font-bold">{mockCarGuard.name}</Text>
-            </View>
-            <TouchableOpacity className="bg-white/20 p-2 rounded-full">
-              <Ionicons name="notifications-outline" size={24} color="white" />
-            </TouchableOpacity>
+          {/* Logo Section */}
+          <View className="items-center mb-6">
+            <TippaLogo size={80} />
           </View>
 
-          {/* Balance Card */}
+          {/* Welcome Message */}
+          <View className="items-center mb-6">
+            <Text className="text-white/80 text-sm">Welcome back,</Text>
+            <Text className="text-white text-2xl font-bold">{mockCarGuard.name}</Text>
+          </View>
+
+          {/* QR Code Section - Prominent */}
+          <View className="bg-white rounded-2xl p-6 shadow-md items-center">
+            <Text className="text-lg font-semibold text-gray-900 mb-4">
+              Your QR Code
+            </Text>
+            <Text className="text-sm text-gray-600 mb-4 text-center">
+              Show this to customers for tips
+            </Text>
+            <Text className="text-xs text-gray-500 mb-4">
+              This is your permanent QR code
+            </Text>
+            <View 
+              ref={qrViewRef} 
+              className="p-4 bg-white rounded-xl border-2 border-gray-100"
+              style={{ backgroundColor: '#ffffff' }}
+            >
+              <QRCode
+                value={`tippa://guard/${mockCarGuard.id}`}
+                size={200}
+                color="#10B981"
+                backgroundColor="#ffffff"
+                enableLinearGradient={false}
+                logo={null}
+              />
+            </View>
+            
+            {/* Guard Info */}
+            <View className="items-center mt-4">
+              <Text className="text-lg font-bold text-gray-900">{mockCarGuard.name}</Text>
+              <Text className="text-sm text-gray-500">ID: {mockCarGuard.id}</Text>
+              <Text className="text-xs text-gray-400 mt-1">Scan to leave a tip</Text>
+            </View>
+
+            <View className="flex-row items-center mt-3 px-3 py-1 bg-tippa-50 rounded-full">
+              <View className="w-2 h-2 bg-tippa-500 rounded-full mr-2" />
+              <Text className="text-xs text-tippa-700">Active</Text>
+            </View>
+
+            {/* Download Button */}
+            <TouchableOpacity
+              onPress={downloadQRCode}
+              disabled={downloadingQR}
+              className={`flex-row items-center justify-center mt-4 px-4 py-3 rounded-xl ${
+                downloadingQR 
+                  ? 'bg-gray-100' 
+                  : 'bg-blue-50 hover:bg-blue-100 active:bg-blue-200'
+              }`}
+            >
+              {downloadingQR ? (
+                <View className="flex-row items-center">
+                  <Text className="text-blue-600 text-sm font-medium mr-2">Preparing...</Text>
+                  <View className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                </View>
+              ) : (
+                <View className="flex-row items-center">
+                  <Ionicons name="download-outline" size={18} color="#2563EB" />
+                  <Text className="text-blue-600 text-sm font-medium ml-2">
+                    Download for Printing
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+
+        {/* Balance Card - Moved Down */}
+        <View className="px-6 mt-6">
           <View className="bg-white rounded-2xl p-4 shadow-lg">
             <Text className="text-gray-600 text-sm mb-1">Available Balance</Text>
             <Text className="text-3xl font-bold text-gray-900">
@@ -86,30 +237,6 @@ export default function DashboardScreen() {
                 <Text className="text-xs text-gray-500">This Week</Text>
                 <Text className="text-base font-semibold text-tippa-600">R 850.00</Text>
               </View>
-            </View>
-          </View>
-        </LinearGradient>
-
-        {/* QR Code Section */}
-        <View className="px-6 -mt-4">
-          <View className="bg-white rounded-2xl p-6 shadow-md items-center">
-            <Text className="text-lg font-semibold text-gray-900 mb-4">
-              Your QR Code
-            </Text>
-            <View className="p-4 bg-gray-50 rounded-xl">
-              <QRCode
-                value={`tippa://guard/${mockCarGuard.id}`}
-                size={200}
-                color="#10B981"
-                backgroundColor="transparent"
-              />
-            </View>
-            <Text className="text-sm text-gray-600 mt-4 text-center">
-              Show this code to customers for instant tips
-            </Text>
-            <View className="flex-row items-center mt-2 px-3 py-1 bg-tippa-50 rounded-full">
-              <View className="w-2 h-2 bg-tippa-500 rounded-full mr-2" />
-              <Text className="text-xs text-tippa-700">Active</Text>
             </View>
           </View>
         </View>
@@ -219,7 +346,7 @@ export default function DashboardScreen() {
         </View>
       </ScrollView>
 
-      {/* Airtime Modal Placeholder */}
+      {/* Airtime Modal */}
       <Modal
         visible={showAirtimeModal}
         animationType="slide"
@@ -228,18 +355,74 @@ export default function DashboardScreen() {
       >
         <View className="flex-1 justify-end bg-black/50">
           <View className="bg-white rounded-t-3xl p-6 pb-10">
-            <View className="flex-row justify-between items-center mb-4">
+            <View className="flex-row justify-between items-center mb-6">
               <Text className="text-xl font-bold">Buy Airtime</Text>
               <TouchableOpacity onPress={() => setShowAirtimeModal(false)}>
                 <Ionicons name="close" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
-            <Text className="text-gray-600">Airtime purchase feature coming soon!</Text>
+
+            {/* Phone Number Input */}
+            <Text className="text-sm font-medium text-gray-700 mb-2">Phone Number</Text>
+            <View className="bg-gray-50 rounded-lg px-4 py-3 mb-4">
+              <TextInput
+                value={phoneNumber}
+                onChangeText={setPhoneNumber}
+                placeholder="Enter phone number (e.g., 0812345678)"
+                keyboardType="phone-pad"
+                className="text-base"
+              />
+            </View>
+
+            {/* Amount Input */}
+            <Text className="text-sm font-medium text-gray-700 mb-2">Amount</Text>
+            <View className="flex-row items-center bg-gray-50 rounded-lg px-4 py-3 mb-2">
+              <Text className="text-xl font-bold text-gray-700 mr-2">R</Text>
+              <TextInput
+                value={airtimeAmount}
+                onChangeText={setAirtimeAmount}
+                placeholder="0.00"
+                keyboardType="numeric"
+                className="flex-1 text-xl"
+              />
+            </View>
+            <Text className="text-xs text-gray-500 mb-6">
+              Available balance: {formatCurrency(mockCarGuard.balance)}
+            </Text>
+
+            {/* Quick Amount Buttons */}
+            <Text className="text-sm font-medium text-gray-700 mb-3">Quick Amounts</Text>
+            <View className="flex-row flex-wrap mb-6">
+              {['10', '20', '50', '100', '200'].map((quickAmount) => (
+                <TouchableOpacity
+                  key={quickAmount}
+                  onPress={() => setAirtimeAmount(quickAmount)}
+                  className="px-4 py-2 rounded-lg mr-2 mb-2 bg-gray-100"
+                >
+                  <Text className="text-sm font-medium text-gray-700">
+                    R{quickAmount}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Submit Button */}
+            <TouchableOpacity
+              onPress={() => {
+                Alert.alert('Purchase Airtime', 'Airtime purchase feature coming soon!');
+                setShowAirtimeModal(false);
+                setAirtimeAmount('');
+                setPhoneNumber('');
+              }}
+              className="bg-tippa-500 rounded-lg py-4 items-center"
+            >
+              <Text className="text-white font-semibold text-base">Purchase Airtime</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* Electricity Modal Placeholder */}
+      {/* Electricity Modal */}
       <Modal
         visible={showElectricityModal}
         animationType="slide"
@@ -248,13 +431,80 @@ export default function DashboardScreen() {
       >
         <View className="flex-1 justify-end bg-black/50">
           <View className="bg-white rounded-t-3xl p-6 pb-10">
-            <View className="flex-row justify-between items-center mb-4">
+            <View className="flex-row justify-between items-center mb-6">
               <Text className="text-xl font-bold">Buy Electricity</Text>
               <TouchableOpacity onPress={() => setShowElectricityModal(false)}>
                 <Ionicons name="close" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
-            <Text className="text-gray-600">Electricity purchase feature coming soon!</Text>
+
+            {/* Meter Number Input */}
+            <Text className="text-sm font-medium text-gray-700 mb-2">Meter Number</Text>
+            <View className="bg-gray-50 rounded-lg px-4 py-3 mb-4">
+              <TextInput
+                value={meterNumber}
+                onChangeText={setMeterNumber}
+                placeholder="Enter meter number (e.g., 12345678901)"
+                keyboardType="numeric"
+                className="text-base"
+              />
+            </View>
+
+            {/* Amount Input */}
+            <Text className="text-sm font-medium text-gray-700 mb-2">Amount</Text>
+            <View className="flex-row items-center bg-gray-50 rounded-lg px-4 py-3 mb-2">
+              <Text className="text-xl font-bold text-gray-700 mr-2">R</Text>
+              <TextInput
+                value={electricityAmount}
+                onChangeText={setElectricityAmount}
+                placeholder="0.00"
+                keyboardType="numeric"
+                className="flex-1 text-xl"
+              />
+            </View>
+            <Text className="text-xs text-gray-500 mb-6">
+              Available balance: {formatCurrency(mockCarGuard.balance)}
+            </Text>
+
+            {/* Quick Amount Buttons */}
+            <Text className="text-sm font-medium text-gray-700 mb-3">Quick Amounts</Text>
+            <View className="flex-row flex-wrap mb-6">
+              {['50', '100', '200', '300', '500'].map((quickAmount) => (
+                <TouchableOpacity
+                  key={quickAmount}
+                  onPress={() => setElectricityAmount(quickAmount)}
+                  className="px-4 py-2 rounded-lg mr-2 mb-2 bg-gray-100"
+                >
+                  <Text className="text-sm font-medium text-gray-700">
+                    R{quickAmount}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Info Note */}
+            <View className="bg-blue-50 rounded-lg p-4 mb-6">
+              <View className="flex-row items-center mb-2">
+                <Ionicons name="information-circle" size={20} color="#3B82F6" />
+                <Text className="text-blue-800 font-medium ml-2">Electricity Purchase</Text>
+              </View>
+              <Text className="text-blue-700 text-sm">
+                You'll receive a prepaid electricity token via SMS after purchase.
+              </Text>
+            </View>
+
+            {/* Submit Button */}
+            <TouchableOpacity
+              onPress={() => {
+                Alert.alert('Purchase Electricity', 'Electricity purchase feature coming soon!');
+                setShowElectricityModal(false);
+                setElectricityAmount('');
+                setMeterNumber('');
+              }}
+              className="bg-tippa-500 rounded-lg py-4 items-center"
+            >
+              <Text className="text-white font-semibold text-base">Purchase Electricity</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>

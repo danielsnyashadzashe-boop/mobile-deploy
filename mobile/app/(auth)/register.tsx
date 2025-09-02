@@ -13,6 +13,7 @@ import { Link, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { TippaLogo } from '../../components/TippaLogo';
 
 const locations = [
   { id: 'loc1', name: 'Sandton City Mall', address: 'Sandton' },
@@ -84,8 +85,8 @@ export default function RegisterScreen() {
           <View className="px-6 py-6">
             {/* Header */}
             <View className="items-center mb-6">
-              <View className="w-16 h-16 bg-tippa-500 rounded-full items-center justify-center mb-3">
-                <Text className="text-white text-xl font-bold">TG</Text>
+              <View className="mb-3">
+                <TippaLogo size={64} />
               </View>
               <Text className="text-2xl font-bold text-gray-900">Guard Registration</Text>
               <Text className="text-gray-600 mt-1 text-center">
