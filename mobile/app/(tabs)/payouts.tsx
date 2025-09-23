@@ -17,7 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { mockPayouts, mockCarGuard, formatCurrency, formatDate } from '../../data/mockData';
-import ElectricityPurchaseModal from '../../components/flash/ElectricityPurchaseModal';
+// import ElectricityPurchaseModal from '../../components/flash/ElectricityPurchaseModal';
 
 export default function PayoutsScreen() {
   const [refreshing, setRefreshing] = useState(false);
@@ -560,15 +560,15 @@ export default function PayoutsScreen() {
         </View>
       </Modal>
 
-      {/* Electricity Purchase Modal */}
-      <ElectricityPurchaseModal
+      {/* Electricity Purchase Modal - Temporarily disabled due to React Query compatibility issue */}
+      {/* <ElectricityPurchaseModal
         visible={showElectricityModal}
         onClose={() => setShowElectricityModal(false)}
         onSuccess={(transaction) => {
           console.log('Electricity purchase successful:', transaction);
           // Could add transaction to local state or trigger a refresh
         }}
-      />
+      /> */}
     </SafeAreaView>
   );
 }

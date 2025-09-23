@@ -5,12 +5,14 @@
 
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { FlashAuthService } from '../auth/authService';
-import { 
-  FLASH_CONFIG, 
-  HTTP_STATUS, 
+import {
+  FLASH_CONFIG,
+  HTTP_STATUS,
   ERROR_MESSAGES,
-  FLASH_ERROR_CODES 
+  FLASH_ERROR_CODES
 } from '../utils/constants';
+import { getApiBaseUrl, getEnvConfig, logger, getRequestTimeout } from '../utils/environment';
+import { withRetry, CircuitBreaker } from '../utils/retryHelper';
 
 // Base API Response Type
 export interface BaseApiResponse<T = any> {
@@ -37,13 +39,21 @@ export interface ApiError {
 export class BaseApiService {
   protected axiosInstance: AxiosInstance;
   protected authService: FlashAuthService;
+  private circuitBreaker: CircuitBreaker;
 
   constructor() {
     this.authService = FlashAuthService.getInstance();
-    
+    this.circuitBreaker = new CircuitBreaker();
+
+    // Use environment-specific base URL
+    const baseURL = getApiBaseUrl();
+    const timeout = getRequestTimeout();
+
+    logger.info(`Initializing Flash API client with base URL: ${baseURL}`);
+
     this.axiosInstance = axios.create({
-      baseURL: FLASH_CONFIG.BASE_URL,
-      timeout: FLASH_CONFIG.TIMEOUT,
+      baseURL,
+      timeout,
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -141,52 +151,53 @@ export class BaseApiService {
       retries?: number;
       customHeaders?: Record<string, string>;
       timeout?: number;
+      skipRetry?: boolean;
     } = {}
   ): Promise<BaseApiResponse<T>> {
-    const { retries = FLASH_CONFIG.RETRY_ATTEMPTS, customHeaders, timeout } = options;
+    const { customHeaders, timeout, skipRetry = false } = options;
+    const envConfig = getEnvConfig();
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
+    const makeRequestFn = async () => {
+      // Use circuit breaker to prevent cascading failures
+      return this.circuitBreaker.execute(async () => {
         const config = {
           method,
           url: endpoint,
-          timeout: timeout || FLASH_CONFIG.TIMEOUT,
+          timeout: timeout || getRequestTimeout(),
           ...(data && { data }),
           ...(customHeaders && { headers: customHeaders }),
         };
 
         const response = await this.axiosInstance.request<T>(config);
-        
+
         return {
           success: true,
           data: response.data,
         };
-
-      } catch (error: any) {
-        // If this is the last attempt or a non-retryable error, throw
-        if (attempt === retries || !this.isRetryableError(error)) {
-          return {
-            success: false,
-            error: this.normalizeError(error),
-          };
-        }
-
-        // Wait before retry
-        if (attempt < retries) {
-          await this.delay(FLASH_CONFIG.RETRY_DELAY * attempt);
-          console.log(`Retrying request (attempt ${attempt + 1}/${retries}): ${endpoint}`);
-        }
-      }
-    }
-
-    // This should never be reached, but just in case
-    return {
-      success: false,
-      error: {
-        code: 'MAX_RETRIES_EXCEEDED',
-        message: 'Maximum retry attempts exceeded',
-      },
+      });
     };
+
+    try {
+      // Use retry helper with exponential backoff
+      if (skipRetry) {
+        return await makeRequestFn();
+      }
+
+      return await withRetry(makeRequestFn, {
+        maxAttempts: options.retries || envConfig.maxRetries,
+        initialDelay: envConfig.retryDelay,
+        onRetry: (error, attempt, nextDelay) => {
+          logger.info(`Retrying ${method} ${endpoint} (attempt ${attempt}), next delay: ${nextDelay}ms`);
+        },
+        shouldRetry: (error) => this.isRetryableError(error),
+      });
+
+    } catch (error: any) {
+      return {
+        success: false,
+        error: this.normalizeError(error),
+      };
+    }
   }
 
   /**
@@ -365,12 +376,6 @@ export class BaseApiService {
     return errorCodeMap[flashErrorCode] || 'UNKNOWN_ERROR';
   }
 
-  /**
-   * Delay utility for retries
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 
   /**
    * Get current account number

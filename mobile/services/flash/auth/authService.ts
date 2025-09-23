@@ -5,19 +5,21 @@
 
 import axios, { AxiosInstance } from 'axios';
 import { FlashSecureStorage, FlashCredentials } from './secureStorage';
-import { 
-  TokenRequest, 
-  TokenResponse, 
+import {
+  TokenRequest,
+  TokenResponse,
   AuthError,
-  FlashApiErrorResponse 
+  FlashApiErrorResponse
 } from '../types/auth.types';
-import { 
-  FLASH_CONFIG, 
-  AUTH_CONFIG, 
-  QA_CREDENTIALS, 
+import {
+  FLASH_CONFIG,
+  AUTH_CONFIG,
+  QA_CREDENTIALS,
   HTTP_STATUS,
-  ERROR_MESSAGES 
+  ERROR_MESSAGES
 } from '../utils/constants';
+import { getApiBaseUrl, getEnvConfig, logger, getRequestTimeout } from '../utils/environment';
+import { withRetry } from '../utils/retryHelper';
 
 /**
  * Flash API Authentication Service
@@ -29,9 +31,15 @@ export class FlashAuthService {
   private refreshPromise: Promise<string> | null = null;
 
   private constructor() {
+    // Use environment-specific base URL
+    const baseURL = getApiBaseUrl();
+    const timeout = getRequestTimeout();
+
+    logger.info(`Initializing Flash Auth Service with base URL: ${baseURL}`);
+
     this.axiosInstance = axios.create({
-      baseURL: FLASH_CONFIG.BASE_URL,
-      timeout: FLASH_CONFIG.TIMEOUT,
+      baseURL,
+      timeout,
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
@@ -81,7 +89,7 @@ export class FlashAuthService {
               return this.axiosInstance.request(error.config);
             }
           } catch (refreshError) {
-            console.error('Token refresh failed:', refreshError);
+            logger.error('Token refresh failed:', refreshError);
           }
         }
         return Promise.reject(error);
@@ -97,18 +105,18 @@ export class FlashAuthService {
       const isInitialized = await FlashSecureStorage.isInitialized();
       
       if (!isInitialized) {
-        console.log('Initializing Flash API credentials...');
+        logger.info('Initializing Flash API credentials...');
         await FlashSecureStorage.initializeCredentials();
       }
 
       // Try to get existing valid token
       const validToken = await FlashSecureStorage.getValidAccessToken();
       if (!validToken) {
-        console.log('No valid token found, requesting new token...');
+        logger.info('No valid token found, requesting new token...');
         await this.requestNewToken();
       }
     } catch (error) {
-      console.error('Failed to initialize Flash authentication:', error);
+      logger.error('Failed to initialize Flash authentication:', error);
       throw this.createAuthError('UNKNOWN_ERROR', 'Failed to initialize authentication', error);
     }
   }
@@ -117,9 +125,11 @@ export class FlashAuthService {
    * Request new access token using OAuth client credentials flow
    */
   public async requestNewToken(): Promise<string> {
-    try {
+    const envConfig = getEnvConfig();
+
+    return withRetry(async () => {
       const credentials = await FlashSecureStorage.getCredentials();
-      
+
       if (!credentials?.authHeader || !credentials?.accountNumber) {
         throw new Error('Missing authentication credentials');
       }
@@ -130,6 +140,8 @@ export class FlashAuthService {
 
       const formData = new URLSearchParams();
       formData.append('grant_type', requestData.grant_type);
+
+      logger.debug('Requesting new access token from Flash API');
 
       const response = await this.axiosInstance.post<TokenResponse>(
         AUTH_CONFIG.TOKEN_ENDPOINT,
@@ -146,28 +158,42 @@ export class FlashAuthService {
       }
 
       // Calculate expiration timestamp (current time + expires_in seconds - buffer)
-      const expiresAt = Date.now() + (response.data.expires_in * 1000) - AUTH_CONFIG.TOKEN_EXPIRY_BUFFER;
+      const expiresAt = Date.now() + (response.data.expires_in * 1000) - envConfig.tokenExpiryBuffer;
 
       // Update stored credentials with new token
       await FlashSecureStorage.updateToken(response.data.access_token, expiresAt);
 
-      console.log('Successfully obtained new access token');
+      logger.info('Successfully obtained new access token');
       return response.data.access_token;
 
-    } catch (error: any) {
-      console.error('Failed to request new token:', error);
-      
+    }, {
+      maxAttempts: envConfig.maxRetries,
+      initialDelay: envConfig.retryDelay,
+      shouldRetry: (error) => {
+        // Don't retry on authentication errors (401/403)
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          return false;
+        }
+        // Retry on network errors and server errors
+        return !error.response || error.response.status >= 500;
+      },
+      onRetry: (error, attempt, nextDelay) => {
+        logger.warn(`Token request failed (attempt ${attempt}), retrying in ${nextDelay}ms:`, error.message);
+      },
+    }).catch((error: any) => {
+      logger.error('Failed to request new token:', error);
+
       if (error.response?.data) {
         const flashError: FlashApiErrorResponse = error.response.data;
         throw this.createAuthError(
-          'INVALID_CREDENTIALS', 
+          'INVALID_CREDENTIALS',
           flashError.error_description || flashError.error || ERROR_MESSAGES.AUTHENTICATION,
           error
         );
       }
 
       throw this.createAuthError('NETWORK_ERROR', ERROR_MESSAGES.NETWORK, error);
-    }
+    });
   }
 
   /**
@@ -205,11 +231,11 @@ export class FlashAuthService {
         }
       }
 
-      console.log('Token expired or invalid, requesting new token...');
+      logger.debug('Token expired or invalid, requesting new token...');
       return await this.requestNewToken();
 
     } catch (error) {
-      console.error('Token refresh failed:', error);
+      logger.error('Token refresh failed:', error);
       throw this.createAuthError('TOKEN_EXPIRED', 'Failed to refresh authentication token', error);
     }
   }
@@ -232,7 +258,7 @@ export class FlashAuthService {
 
       return validToken;
     } catch (error) {
-      console.error('Failed to get valid access token:', error);
+      logger.error('Failed to get valid access token:', error);
       throw this.createAuthError('TOKEN_EXPIRED', 'Unable to obtain valid access token', error);
     }
   }
@@ -245,7 +271,7 @@ export class FlashAuthService {
       const validToken = await FlashSecureStorage.getValidAccessToken();
       return !!validToken;
     } catch (error) {
-      console.error('Authentication check failed:', error);
+      logger.error('Authentication check failed:', error);
       return false;
     }
   }
@@ -262,7 +288,7 @@ export class FlashAuthService {
         'Accept': 'application/json',
       };
     } catch (error) {
-      console.error('Failed to get auth headers:', error);
+      logger.error('Failed to get auth headers:', error);
       throw this.createAuthError('TOKEN_EXPIRED', 'Unable to get authentication headers', error);
     }
   }
@@ -273,9 +299,9 @@ export class FlashAuthService {
   public async logout(): Promise<void> {
     try {
       await FlashSecureStorage.clearCredentials();
-      console.log('Successfully logged out and cleared credentials');
+      logger.info('Successfully logged out and cleared credentials');
     } catch (error) {
-      console.error('Failed to logout:', error);
+      logger.error('Failed to logout:', error);
       // Don't throw here - logout should be best effort
     }
   }
@@ -288,7 +314,7 @@ export class FlashAuthService {
       const credentials = await FlashSecureStorage.getCredentials();
       return credentials?.accountNumber || null;
     } catch (error) {
-      console.error('Failed to get account number:', error);
+      logger.error('Failed to get account number:', error);
       return null;
     }
   }
@@ -305,7 +331,7 @@ export class FlashAuthService {
       
       return response.status === HTTP_STATUS.OK;
     } catch (error: any) {
-      console.error('Authentication test failed:', error);
+      logger.error('Authentication test failed:', error);
       
       if (error.response?.status === HTTP_STATUS.UNAUTHORIZED) {
         return false;
@@ -341,7 +367,7 @@ export class FlashAuthService {
       const response = await this.axiosInstance.request(config);
       return response.data;
     } catch (error: any) {
-      console.error(`API request failed [${method} ${endpoint}]:`, error);
+      logger.error(`API request failed [${method} ${endpoint}]:`, error);
       
       if (error.response?.data) {
         throw error.response.data;
