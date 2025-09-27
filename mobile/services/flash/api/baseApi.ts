@@ -74,7 +74,10 @@ export class BaseApiService {
           // Add authentication headers (except for token endpoint)
           if (!config.url?.includes('/oauth/token')) {
             const authHeaders = await this.authService.getAuthHeaders();
-            config.headers = { ...config.headers, ...authHeaders };
+            // Properly merge headers with AxiosHeaders
+            Object.entries(authHeaders).forEach(([key, value]) => {
+              config.headers.set(key, value);
+            });
           }
 
           // Log request in development
@@ -126,7 +129,10 @@ export class BaseApiService {
             // Retry original request with new token
             if (error.config) {
               const authHeaders = await this.authService.getAuthHeaders();
-              error.config.headers = { ...error.config.headers, ...authHeaders };
+              // Properly merge headers with AxiosHeaders
+              Object.entries(authHeaders).forEach(([key, value]) => {
+                error.config.headers.set(key, value);
+              });
               return this.axiosInstance.request(error.config);
             }
           } catch (refreshError) {

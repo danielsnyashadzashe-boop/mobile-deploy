@@ -107,6 +107,7 @@ export const BUSINESS_RULES = {
     MAX_AMOUNT: 5000,
     DENOMINATIONS: [5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000],
     PIN_LENGTH: 16,
+    EXPIRY_WARNING_DAYS: 7,
   },
 
   // Prepaid Electricity

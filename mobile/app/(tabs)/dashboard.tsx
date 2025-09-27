@@ -100,9 +100,10 @@ export default function DashboardScreen() {
       }
     } catch (error) {
       console.error('Error downloading QR code:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       Alert.alert(
-        'Download Error', 
-        `Failed to save QR code: ${error.message || 'Unknown error'}\n\nPlease try again or contact support if the issue persists.`,
+        'Download Error',
+        `Failed to save QR code: ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
         [{ text: 'OK' }]
       );
     } finally {
@@ -178,7 +179,7 @@ export default function DashboardScreen() {
                 color="#10B981"
                 backgroundColor="#ffffff"
                 enableLinearGradient={false}
-                logo={null}
+                logo={undefined}
               />
             </View>
             

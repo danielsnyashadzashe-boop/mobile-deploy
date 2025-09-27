@@ -20,6 +20,13 @@ export interface ApiErrorResponse {
 }
 
 /**
+ * Extended Axios config with custom properties
+ */
+interface ExtendedAxiosRequestConfig extends AxiosRequestConfig {
+  skipRetry?: boolean;
+}
+
+/**
  * Make an authenticated request to Flash API
  * Handles authentication, retries, and error formatting
  */
@@ -27,7 +34,7 @@ export async function makeAuthenticatedRequest<T = any>(
   method: Method,
   endpoint: string,
   data?: any,
-  config?: Partial<AxiosRequestConfig>
+  config?: Partial<ExtendedAxiosRequestConfig>
 ): Promise<T> {
   const authService = FlashAuthService.getInstance();
   

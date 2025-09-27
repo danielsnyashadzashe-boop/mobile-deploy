@@ -217,11 +217,11 @@ export const validateFormData = (
  * Check if amount is in available denominations (for vouchers)
  */
 export const isValidDenomination = (amount: number, type: 'voucher' | 'airtime'): boolean => {
-  const denominations = type === 'voucher' 
+  const denominations = type === 'voucher'
     ? BUSINESS_RULES.VOUCHER.DENOMINATIONS
     : BUSINESS_RULES.AIRTIME.COMMON_DENOMINATIONS;
-    
-  return denominations.includes(amount);
+
+  return denominations.includes(amount as any);
 };
 
 /**
@@ -230,11 +230,11 @@ export const isValidDenomination = (amount: number, type: 'voucher' | 'airtime')
 export const getSuggestedAmounts = (type: 'voucher' | 'electricity' | 'airtime'): number[] => {
   switch (type) {
     case 'voucher':
-      return BUSINESS_RULES.VOUCHER.DENOMINATIONS.slice(0, 8); // First 8 denominations
+      return [...BUSINESS_RULES.VOUCHER.DENOMINATIONS].slice(0, 8); // First 8 denominations
     case 'electricity':
       return [20, 50, 100, 200, 300, 500, 1000, 2000];
     case 'airtime':
-      return BUSINESS_RULES.AIRTIME.COMMON_DENOMINATIONS;
+      return [...BUSINESS_RULES.AIRTIME.COMMON_DENOMINATIONS];
     default:
       return [];
   }
