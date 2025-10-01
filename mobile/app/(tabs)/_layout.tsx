@@ -15,7 +15,7 @@ export default function TabLayout() {
           paddingBottom: 34, // More space for iOS home indicator
           paddingTop: 8,
         },
-        tabBarActiveTintColor: '#10B981',
+        tabBarActiveTintColor: '#5B94D3',
         tabBarInactiveTintColor: '#6b7280',
         tabBarLabelStyle: {
           fontSize: 12,

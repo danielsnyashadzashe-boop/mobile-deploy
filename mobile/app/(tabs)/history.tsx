@@ -164,13 +164,13 @@ export default function HistoryScreen() {
       case 'tip':
         return { name: 'cash', color: '#10B981' };
       case 'payout':
-        return { name: 'wallet', color: '#EF4444' };
+        return { name: 'wallet', color: '#B01519' };
       case 'airtime':
-        return { name: 'phone-portrait', color: '#3B82F6' };
+        return { name: 'phone-portrait', color: '#5B94D3' };
       case 'electricity':
         return { name: 'flash', color: '#F59E0B' };
       default:
-        return { name: 'swap-horizontal', color: '#9333EA' };
+        return { name: 'swap-horizontal', color: '#5B94D3' };
     }
   };
 
@@ -190,9 +190,10 @@ export default function HistoryScreen() {
               <Text className="text-sm font-semibold text-gray-900">
                 {item.description}
               </Text>
-              <Text className={`text-sm font-bold ${
-                item.amount > 0 ? 'text-green-600' : 'text-red-600'
-              }`}>
+              <Text
+                className="text-sm font-bold"
+                style={{ color: item.amount > 0 ? '#10B981' : '#B01519' }}
+              >
                 {item.amount > 0 ? '+' : ''}{formatCurrency(Math.abs(item.amount))}
               </Text>
             </View>
@@ -247,7 +248,10 @@ export default function HistoryScreen() {
               <Text className="text-xs text-gray-600 font-medium">Net</Text>
               <Ionicons name={netAmount >= 0 ? "trending-up-outline" : "trending-down-outline"} size={12} color="#6B7280" className="ml-1" />
             </View>
-            <Text className={`text-lg font-bold ${netAmount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <Text
+              className="text-lg font-bold"
+              style={{ color: netAmount >= 0 ? '#10B981' : '#B01519' }}
+            >
               {formatCurrency(Math.abs(netAmount))}
             </Text>
           </View>
@@ -285,13 +289,19 @@ export default function HistoryScreen() {
                       setShowPeriodDropdown(false);
                       setCurrentPage(1); // Reset pagination
                     }}
-                    className={`px-3 py-2.5 border-b border-gray-100 ${
-                      period === selectedPeriod ? 'bg-tippa-50' : ''
-                    }`}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      borderBottomWidth: 1,
+                      borderBottomColor: '#F3F4F6',
+                      backgroundColor: period === selectedPeriod ? '#F0F8FF' : 'transparent'
+                    }}
                   >
-                    <Text className={`text-sm ${
-                      period === selectedPeriod ? 'text-tippa-600 font-medium' : 'text-gray-700'
-                    }`}>
+                    <Text style={{
+                      fontSize: 14,
+                      color: period === selectedPeriod ? '#5B94D3' : '#374151',
+                      fontWeight: period === selectedPeriod ? '500' : '400'
+                    }}>
                       {period}
                     </Text>
                   </TouchableOpacity>
@@ -325,17 +335,23 @@ export default function HistoryScreen() {
                 setSelectedFilter(type.toLowerCase());
                 setCurrentPage(1); // Reset pagination
               }}
-              className={`px-4 py-2 rounded-lg mr-2 ${
-                selectedFilter === type.toLowerCase() || (selectedFilter === 'all' && type === 'All')
-                  ? 'bg-tippa-500' 
-                  : 'bg-gray-100'
-              }`}
+              style={{
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+                borderRadius: 8,
+                marginRight: 8,
+                backgroundColor: (selectedFilter === type.toLowerCase() || (selectedFilter === 'all' && type === 'All'))
+                  ? '#5B94D3'
+                  : '#F3F4F6'
+              }}
             >
-              <Text className={`text-sm font-medium ${
-                selectedFilter === type.toLowerCase() || (selectedFilter === 'all' && type === 'All')
-                  ? 'text-white' 
-                  : 'text-gray-700'
-              }`}>
+              <Text style={{
+                fontSize: 14,
+                fontWeight: '500',
+                color: (selectedFilter === type.toLowerCase() || (selectedFilter === 'all' && type === 'All'))
+                  ? '#FFFFFF'
+                  : '#374151'
+              }}>
                 {type}
               </Text>
             </TouchableOpacity>
@@ -379,13 +395,17 @@ export default function HistoryScreen() {
               <TouchableOpacity
                 onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
-                className={`px-4 py-2 rounded-lg ${
-                  currentPage === 1 ? 'bg-gray-200' : 'bg-tippa-500'
-                }`}
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  backgroundColor: currentPage === 1 ? '#E5E7EB' : '#5B94D3'
+                }}
               >
-                <Text className={`font-medium ${
-                  currentPage === 1 ? 'text-gray-400' : 'text-white'
-                }`}>
+                <Text style={{
+                  fontWeight: '500',
+                  color: currentPage === 1 ? '#9CA3AF' : '#FFFFFF'
+                }}>
                   Previous
                 </Text>
               </TouchableOpacity>
@@ -399,13 +419,17 @@ export default function HistoryScreen() {
               <TouchableOpacity
                 onPress={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                 disabled={currentPage === totalPages}
-                className={`px-4 py-2 rounded-lg ${
-                  currentPage === totalPages ? 'bg-gray-200' : 'bg-tippa-500'
-                }`}
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  backgroundColor: currentPage === totalPages ? '#E5E7EB' : '#5B94D3'
+                }}
               >
-                <Text className={`font-medium ${
-                  currentPage === totalPages ? 'text-gray-400' : 'text-white'
-                }`}>
+                <Text style={{
+                  fontWeight: '500',
+                  color: currentPage === totalPages ? '#9CA3AF' : '#FFFFFF'
+                }}>
                   Next
                 </Text>
               </TouchableOpacity>
@@ -514,7 +538,8 @@ export default function HistoryScreen() {
 
             <TouchableOpacity
               onPress={handleApplyCustomRange}
-              className="flex-1 bg-tippa-500 rounded-lg py-4 items-center"
+              style={{ backgroundColor: '#5B94D3' }}
+              className="flex-1 rounded-lg py-4 items-center"
             >
               <Text className="text-white font-semibold text-base">Apply Range</Text>
             </TouchableOpacity>

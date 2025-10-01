@@ -143,7 +143,7 @@ export default function DashboardScreen() {
       >
         {/* Header with Logo */}
         <LinearGradient
-          colors={['#10B981', '#059669']}
+          colors={['#5B94D3', '#11468F']}
           className="px-6 pt-4 pb-8"
         >
           {/* Logo Section */}
@@ -176,7 +176,7 @@ export default function DashboardScreen() {
               <QRCode
                 value={`tippa://guard/${mockCarGuard.id}`}
                 size={200}
-                color="#10B981"
+                color="#5B94D3"
                 backgroundColor="#ffffff"
                 enableLinearGradient={false}
                 logo={undefined}
@@ -190,30 +190,29 @@ export default function DashboardScreen() {
               <Text className="text-xs text-gray-400 mt-1">Scan to leave a tip</Text>
             </View>
 
-            <View className="flex-row items-center mt-3 px-3 py-1 bg-tippa-50 rounded-full">
-              <View className="w-2 h-2 bg-tippa-500 rounded-full mr-2" />
-              <Text className="text-xs text-tippa-700">Active</Text>
+            <View className="flex-row items-center mt-3 px-3 py-1 bg-green-50 rounded-full">
+              <View className="w-2 h-2 bg-tippa-success rounded-full mr-2" />
+              <Text className="text-xs text-green-700">Active</Text>
             </View>
 
             {/* Download Button */}
             <TouchableOpacity
               onPress={downloadQRCode}
               disabled={downloadingQR}
-              className={`flex-row items-center justify-center mt-4 px-4 py-3 rounded-xl ${
-                downloadingQR 
-                  ? 'bg-gray-100' 
-                  : 'bg-blue-50 hover:bg-blue-100 active:bg-blue-200'
-              }`}
+              style={{
+                backgroundColor: downloadingQR ? '#F3F4F6' : '#5B94D3'
+              }}
+              className="flex-row items-center justify-center mt-4 px-4 py-3 rounded-xl"
             >
               {downloadingQR ? (
                 <View className="flex-row items-center">
-                  <Text className="text-blue-600 text-sm font-medium mr-2">Preparing...</Text>
-                  <View className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <Text className="text-tippa-secondary text-sm font-medium mr-2">Preparing...</Text>
+                  <View className="w-4 h-4 border-2 border-tippa-secondary border-t-transparent rounded-full animate-spin" />
                 </View>
               ) : (
                 <View className="flex-row items-center">
-                  <Ionicons name="download-outline" size={18} color="#2563EB" />
-                  <Text className="text-blue-600 text-sm font-medium ml-2">
+                  <Ionicons name="download-outline" size={18} color="#FFFFFF" />
+                  <Text className="text-white text-sm font-medium ml-2">
                     Download for Printing
                   </Text>
                 </View>
@@ -232,11 +231,11 @@ export default function DashboardScreen() {
             <View className="flex-row justify-between mt-4">
               <View>
                 <Text className="text-xs text-gray-500">Today's Earnings</Text>
-                <Text className="text-base font-semibold text-tippa-600">R 150.00</Text>
+                <Text className="text-base font-semibold text-tippa-success">R 150.00</Text>
               </View>
               <View>
                 <Text className="text-xs text-gray-500">This Week</Text>
-                <Text className="text-base font-semibold text-tippa-600">R 850.00</Text>
+                <Text className="text-base font-semibold text-tippa-success">R 850.00</Text>
               </View>
             </View>
           </View>
@@ -275,8 +274,8 @@ export default function DashboardScreen() {
               className="bg-white rounded-xl p-4 shadow-sm mb-4"
               style={{ width: '48%' }}
             >
-              <View className="bg-green-100 w-10 h-10 rounded-full items-center justify-center mb-2">
-                <Ionicons name="cash-outline" size={20} color="#10B981" />
+              <View style={{ backgroundColor: '#DEFF0033' }} className="w-10 h-10 rounded-full items-center justify-center mb-2">
+                <Ionicons name="cash-outline" size={20} color="#DEFF00" />
               </View>
               <Text className="text-sm font-medium text-gray-900">Request Payout</Text>
               <Text className="text-xs text-gray-500">To bank or cash</Text>
@@ -301,7 +300,7 @@ export default function DashboardScreen() {
           <View className="flex-row justify-between items-center mb-4">
             <Text className="text-lg font-semibold text-gray-900">Recent Activity</Text>
             <TouchableOpacity>
-              <Text className="text-sm text-tippa-600">See all</Text>
+              <Text className="text-sm text-tippa-secondary">See all</Text>
             </TouchableOpacity>
           </View>
 
@@ -315,14 +314,15 @@ export default function DashboardScreen() {
               >
                 <View className="flex-row items-center flex-1">
                   <View
-                    className={`w-10 h-10 rounded-full items-center justify-center ${
-                      transaction.type === 'tip' ? 'bg-green-100' : 'bg-red-100'
-                    }`}
+                    className={`w-10 h-10 rounded-full items-center justify-center`}
+                    style={{
+                      backgroundColor: transaction.type === 'tip' ? '#10B98133' : '#B0151933'
+                    }}
                   >
                     <Ionicons
                       name={transaction.type === 'tip' ? 'arrow-down' : 'arrow-up'}
                       size={20}
-                      color={transaction.type === 'tip' ? '#10B981' : '#EF4444'}
+                      color={transaction.type === 'tip' ? '#10B981' : '#B01519'}
                     />
                   </View>
                   <View className="ml-3 flex-1">
@@ -335,9 +335,10 @@ export default function DashboardScreen() {
                   </View>
                 </View>
                 <Text
-                  className={`text-base font-semibold ${
-                    transaction.amount > 0 ? 'text-green-600' : 'text-red-600'
-                  }`}
+                  className="text-base font-semibold"
+                  style={{
+                    color: transaction.amount > 0 ? '#10B981' : '#B01519'
+                  }}
                 >
                   {transaction.amount > 0 ? '+' : ''}{formatCurrency(Math.abs(transaction.amount))}
                 </Text>
@@ -415,7 +416,8 @@ export default function DashboardScreen() {
                 setAirtimeAmount('');
                 setPhoneNumber('');
               }}
-              className="bg-tippa-500 rounded-lg py-4 items-center"
+              style={{ backgroundColor: '#5B94D3' }}
+              className="rounded-lg py-4 items-center"
             >
               <Text className="text-white font-semibold text-base">Purchase Airtime</Text>
             </TouchableOpacity>
@@ -502,7 +504,8 @@ export default function DashboardScreen() {
                 setElectricityAmount('');
                 setMeterNumber('');
               }}
-              className="bg-tippa-500 rounded-lg py-4 items-center"
+              style={{ backgroundColor: '#5B94D3' }}
+              className="rounded-lg py-4 items-center"
             >
               <Text className="text-white font-semibold text-base">Purchase Electricity</Text>
             </TouchableOpacity>

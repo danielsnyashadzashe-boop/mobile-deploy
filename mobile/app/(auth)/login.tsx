@@ -75,13 +75,14 @@ export default function LoginScreen() {
                   keyboardType="numeric"
                 />
                 <TouchableOpacity className="mt-2">
-                  <Text className="text-xs text-tippa-600">Forgot PIN/Password?</Text>
+                  <Text style={{ color: '#5B94D3' }} className="text-xs">Forgot PIN/Password?</Text>
                 </TouchableOpacity>
               </View>
 
               <TouchableOpacity
                 onPress={handleLogin}
-                className="w-full bg-tippa-500 py-4 rounded-lg mt-6"
+                style={{ backgroundColor: '#5B94D3' }}
+                className="w-full py-4 rounded-lg mt-6"
               >
                 <Text className="text-white text-center font-semibold text-base">
                   Login
@@ -96,7 +97,7 @@ export default function LoginScreen() {
               </Text>
               <Link href="/register" asChild>
                 <TouchableOpacity>
-                  <Text className="text-center text-tippa-600 font-semibold">
+                  <Text style={{ color: '#5B94D3' }} className="text-center font-semibold">
                     Apply to become a Car Guard
                   </Text>
                 </TouchableOpacity>

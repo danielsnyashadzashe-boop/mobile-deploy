@@ -55,7 +55,8 @@ export default function ProfileScreen() {
           <Text className="text-2xl font-bold text-gray-900">Profile</Text>
           <TouchableOpacity
             onPress={() => isEditing ? handleSave() : setIsEditing(true)}
-            className="px-4 py-2 bg-tippa-500 rounded-lg"
+            style={{ backgroundColor: '#5B94D3' }}
+            className="px-4 py-2 rounded-lg"
           >
             <Text className="text-white font-medium">
               {isEditing ? 'Save' : 'Edit'}
@@ -65,8 +66,8 @@ export default function ProfileScreen() {
 
         {/* Profile Card */}
         <View className="bg-white mx-4 mt-4 rounded-xl p-6 shadow-sm items-center">
-          <View className="w-24 h-24 bg-tippa-100 rounded-full items-center justify-center mb-4">
-            <Text className="text-3xl font-bold text-tippa-600">
+          <View style={{ backgroundColor: '#5B94D333' }} className="w-24 h-24 rounded-full items-center justify-center mb-4">
+            <Text style={{ color: '#5B94D3' }} className="text-3xl font-bold">
               {mockCarGuard.name.split(' ').map(n => n[0]).join('')}
             </Text>
           </View>
@@ -93,7 +94,7 @@ export default function ProfileScreen() {
               <Text className="text-xs text-gray-500">Total Earnings</Text>
             </View>
             <View className="items-center">
-              <Text className="text-2xl font-bold text-tippa-600">
+              <Text style={{ color: '#5B94D3' }} className="text-2xl font-bold">
                 {formatCurrency(mockCarGuard.balance)}
               </Text>
               <Text className="text-xs text-gray-500">Available</Text>
@@ -222,7 +223,7 @@ export default function ProfileScreen() {
             <Switch
               value={notifications}
               onValueChange={setNotifications}
-              trackColor={{ false: '#D1D5DB', true: '#10B981' }}
+              trackColor={{ false: '#D1D5DB', true: '#5B94D3' }}
               thumbColor="#ffffff"
             />
           </View>
@@ -255,9 +256,10 @@ export default function ProfileScreen() {
         {/* Logout Button */}
         <TouchableOpacity
           onPress={handleLogout}
-          className="mx-4 mt-6 mb-8 bg-red-50 rounded-xl p-4 items-center"
+          style={{ backgroundColor: '#B0151933' }}
+          className="mx-4 mt-6 mb-8 rounded-xl p-4 items-center"
         >
-          <Text className="text-red-600 font-semibold">Logout</Text>
+          <Text style={{ color: '#B01519' }} className="font-semibold">Logout</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

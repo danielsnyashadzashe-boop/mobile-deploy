@@ -241,7 +241,8 @@ export default function RegisterScreen() {
             {/* Submit Button */}
             <TouchableOpacity
               onPress={handleSubmit}
-              className="w-full bg-tippa-500 py-4 rounded-lg mb-4"
+              style={{ backgroundColor: '#5B94D3' }}
+              className="w-full py-4 rounded-lg mb-4"
             >
               <Text className="text-white text-center font-semibold text-base">
                 Submit Registration
@@ -253,7 +254,7 @@ export default function RegisterScreen() {
               <Text className="text-gray-600">Already have an account? </Text>
               <Link href="/login" asChild>
                 <TouchableOpacity>
-                  <Text className="text-tippa-600 font-semibold">Sign In</Text>
+                  <Text style={{ color: '#5B94D3' }} className="font-semibold">Sign In</Text>
                 </TouchableOpacity>
               </Link>
             </View>

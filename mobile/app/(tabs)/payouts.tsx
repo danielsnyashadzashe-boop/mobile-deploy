@@ -125,8 +125,8 @@ export default function PayoutsScreen() {
       <TouchableOpacity className="p-4">
         <View className="flex-row items-center justify-between mb-2">
           <View className="flex-row items-center flex-1">
-            <View className="w-10 h-10 bg-tippa-100 rounded-full items-center justify-center mr-3">
-              <Ionicons name={getPayoutIcon(item.type) as any} size={20} color="#10B981" />
+            <View style={{ backgroundColor: '#5B94D333' }} className="w-10 h-10 rounded-full items-center justify-center mr-3">
+              <Ionicons name={getPayoutIcon(item.type) as any} size={20} color="#5B94D3" />
             </View>
             <View className="flex-1">
               <Text className="text-base font-semibold text-gray-900">
@@ -230,9 +230,10 @@ export default function PayoutsScreen() {
 
             <TouchableOpacity
               onPress={() => setShowRequestModal(true)}
-              className="bg-tippa-500 rounded-lg py-4 items-center"
+              style={{ backgroundColor: '#DEFF00' }}
+              className="rounded-lg py-4 items-center"
             >
-              <Text className="text-white font-semibold text-base">Request Payout</Text>
+              <Text style={{ color: '#11468F' }} className="font-semibold text-base">Request Payout</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -375,13 +376,17 @@ export default function PayoutsScreen() {
                 <TouchableOpacity
                   onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
                   disabled={currentPage === 1}
-                  className={`px-4 py-2 rounded-lg ${
-                    currentPage === 1 ? 'bg-gray-200' : 'bg-tippa-500'
-                  }`}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    backgroundColor: currentPage === 1 ? '#E5E7EB' : '#5B94D3'
+                  }}
                 >
-                  <Text className={`font-medium ${
-                    currentPage === 1 ? 'text-gray-400' : 'text-white'
-                  }`}>
+                  <Text style={{
+                    fontWeight: '500',
+                    color: currentPage === 1 ? '#9CA3AF' : '#FFFFFF'
+                  }}>
                     Previous
                   </Text>
                 </TouchableOpacity>
@@ -395,13 +400,17 @@ export default function PayoutsScreen() {
                 <TouchableOpacity
                   onPress={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                   disabled={currentPage === totalPages}
-                  className={`px-4 py-2 rounded-lg ${
-                    currentPage === totalPages ? 'bg-gray-200' : 'bg-tippa-500'
-                  }`}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    backgroundColor: currentPage === totalPages ? '#E5E7EB' : '#5B94D3'
+                  }}
                 >
-                  <Text className={`font-medium ${
-                    currentPage === totalPages ? 'text-gray-400' : 'text-white'
-                  }`}>
+                  <Text style={{
+                    fontWeight: '500',
+                    color: currentPage === totalPages ? '#9CA3AF' : '#FFFFFF'
+                  }}>
                     Next
                   </Text>
                 </TouchableOpacity>
@@ -435,13 +444,20 @@ export default function PayoutsScreen() {
                 <TouchableOpacity
                   key={type}
                   onPress={() => setPayoutType(type)}
-                  className={`px-4 py-2 rounded-lg mr-2 mb-2 ${
-                    payoutType === type ? 'bg-tippa-500' : 'bg-gray-100'
-                  }`}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    marginRight: 8,
+                    marginBottom: 8,
+                    backgroundColor: payoutType === type ? '#5B94D3' : '#F3F4F6'
+                  }}
                 >
-                  <Text className={`text-sm font-medium ${
-                    payoutType === type ? 'text-white' : 'text-gray-700'
-                  }`}>
+                  <Text style={{
+                    fontSize: 14,
+                    fontWeight: '500',
+                    color: payoutType === type ? '#FFFFFF' : '#374151'
+                  }}>
                     {type.replace('_', ' ').charAt(0).toUpperCase() + type.slice(1).replace('_', ' ')}
                   </Text>
                 </TouchableOpacity>
@@ -467,7 +483,8 @@ export default function PayoutsScreen() {
             {/* Submit Button */}
             <TouchableOpacity
               onPress={handleRequestPayout}
-              className="bg-tippa-500 rounded-lg py-4 items-center"
+              style={{ backgroundColor: '#5B94D3' }}
+              className="rounded-lg py-4 items-center"
             >
               <Text className="text-white font-semibold text-base">Submit Request</Text>
             </TouchableOpacity>
@@ -505,7 +522,7 @@ export default function PayoutsScreen() {
                 <Switch
                   value={autoPayoutEnabled}
                   onValueChange={setAutoPayoutEnabled}
-                  trackColor={{ false: '#d1d5db', true: '#10B981' }}
+                  trackColor={{ false: '#d1d5db', true: '#5B94D3' }}
                   thumbColor={autoPayoutEnabled ? '#ffffff' : '#ffffff'}
                 />
               </View>
@@ -552,7 +569,8 @@ export default function PayoutsScreen() {
                 Alert.alert('Settings Saved', 'Your payout settings have been updated.');
                 setShowSettingsModal(false);
               }}
-              className="bg-tippa-500 rounded-lg py-4 items-center"
+              style={{ backgroundColor: '#5B94D3' }}
+              className="rounded-lg py-4 items-center"
             >
               <Text className="text-white font-semibold text-base">Save Settings</Text>
             </TouchableOpacity>
