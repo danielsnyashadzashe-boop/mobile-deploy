@@ -12,15 +12,18 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useAuth, useUser } from '@clerk/clerk-expo';
 import { mockCarGuard, formatCurrency } from '../../data/mockData';
 
 export default function ProfileScreen() {
+  const { signOut } = useAuth();
+  const { user } = useUser();
   const [isEditing, setIsEditing] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [profileData, setProfileData] = useState({
-    name: mockCarGuard.name,
-    phoneNumber: mockCarGuard.phoneNumber,
-    email: mockCarGuard.email || '',
+    name: user?.fullName || mockCarGuard.name,
+    phoneNumber: user?.primaryPhoneNumber?.phoneNumber || mockCarGuard.phoneNumber,
+    email: user?.primaryEmailAddress?.emailAddress || mockCarGuard.email || '',
     bankName: mockCarGuard.bankDetails?.bankName || '',
     accountNumber: mockCarGuard.bankDetails?.accountNumber || '',
     accountType: mockCarGuard.bankDetails?.accountType || '',
@@ -38,10 +41,17 @@ export default function ProfileScreen() {
       'Are you sure you want to logout?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Logout', 
+        {
+          text: 'Logout',
           style: 'destructive',
-          onPress: () => router.replace('/login')
+          onPress: async () => {
+            try {
+              await signOut();
+              router.replace('/(auth)/login');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to sign out. Please try again.');
+            }
+          }
         }
       ]
     );
@@ -72,8 +82,8 @@ export default function ProfileScreen() {
             </Text>
           </View>
           
-          <Text className="text-xl font-bold text-gray-900">{mockCarGuard.name}</Text>
-          <Text className="text-sm text-gray-500">Guard ID: {mockCarGuard.id}</Text>
+          <Text className="text-xl font-bold text-gray-900">{user?.fullName || mockCarGuard.name}</Text>
+          <Text className="text-sm text-gray-500">{user?.primaryEmailAddress?.emailAddress || 'Guard ID: ' + mockCarGuard.id}</Text>
           
           <View className="flex-row items-center mt-2">
             <View className="flex-row items-center px-3 py-1 bg-green-50 rounded-full">

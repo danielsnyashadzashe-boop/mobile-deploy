@@ -11,64 +11,70 @@ import {
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Picker } from '@react-native-picker/picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSignUp } from '@clerk/clerk-expo';
 import { TippaLogo } from '../../components/TippaLogo';
 
-const locations = [
-  { id: 'loc1', name: 'Sandton City Mall', address: 'Sandton' },
-  { id: 'loc2', name: 'V&A Waterfront', address: 'Cape Town' },
-  { id: 'loc3', name: 'Menlyn Park Shopping Centre', address: 'Pretoria' },
-  { id: 'loc4', name: 'Gateway Theatre of Shopping', address: 'Durban' },
-];
-
-const banks = [
-  { value: 'fnb', label: 'FNB' },
-  { value: 'standardbank', label: 'Standard Bank' },
-  { value: 'absa', label: 'ABSA' },
-  { value: 'nedbank', label: 'Nedbank' },
-  { value: 'capitec', label: 'Capitec' },
-  { value: 'tymebank', label: 'TymeBank' },
-];
-
 export default function RegisterScreen() {
-  const [formData, setFormData] = useState({
-    fullName: '',
-    idNumber: '',
-    phoneNumber: '',
-    email: '',
-    preferredLocation: '',
-    bankName: '',
-    accountNumber: '',
-    accountType: '',
-    branchCode: '',
-  });
+  const { signUp, setActive, isLoaded } = useSignUp();
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [pendingVerification, setPendingVerification] = useState(false);
+  const [code, setCode] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async () => {
-    // Validate required fields
-    if (!formData.fullName || !formData.idNumber || !formData.phoneNumber || !formData.preferredLocation) {
+  const handleSignUp = async () => {
+    if (!isLoaded) return;
+
+    if (!firstName || !lastName || !email || !password) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
-    try {
-      // Store registration in AsyncStorage
-      const pendingRegistrations = JSON.parse(await AsyncStorage.getItem('pendingRegistrations') || '[]');
-      pendingRegistrations.push({
-        ...formData,
-        id: `pr-${Date.now()}`,
-        submittedAt: new Date().toISOString(),
-        status: 'pending',
-      });
-      await AsyncStorage.setItem('pendingRegistrations', JSON.stringify(pendingRegistrations));
+    setIsLoading(true);
 
-      Alert.alert(
-        'Success',
-        "Registration submitted! You'll receive an SMS once approved.",
-        [{ text: 'OK', onPress: () => router.replace('/login') }]
-      );
-    } catch (error) {
-      Alert.alert('Error', 'Failed to submit registration. Please try again.');
+    try {
+      await signUp.create({
+        firstName,
+        lastName,
+        emailAddress: email,
+        password,
+        phoneNumber: phoneNumber || undefined,
+      });
+
+      await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
+
+      setPendingVerification(true);
+      Alert.alert('Verification Required', 'Please check your email for a verification code.');
+    } catch (err: any) {
+      Alert.alert('Registration Failed', err.errors?.[0]?.message || 'Failed to create account. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerify = async () => {
+    if (!isLoaded) return;
+
+    setIsLoading(true);
+
+    try {
+      const completeSignUp = await signUp.attemptEmailAddressVerification({
+        code,
+      });
+
+      if (completeSignUp.status === 'complete') {
+        await setActive({ session: completeSignUp.createdSessionId });
+        router.replace('/(tabs)/dashboard');
+      } else {
+        Alert.alert('Error', 'Verification incomplete. Please try again.');
+      }
+    } catch (err: any) {
+      Alert.alert('Verification Failed', err.errors?.[0]?.message || 'Invalid code. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -94,158 +100,108 @@ export default function RegisterScreen() {
               </Text>
             </View>
 
-            {/* Personal Information */}
-            <View className="mb-6">
-              <Text className="text-lg font-semibold text-gray-800 mb-4">
-                Personal Information
-              </Text>
+            {!pendingVerification ? (
+              <>
+                {/* Personal Information */}
+                <View className="mb-6">
+                  <Text className="text-lg font-semibold text-gray-800 mb-4">
+                    Personal Information
+                  </Text>
 
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">Full Name *</Text>
-                <TextInput
-                  value={formData.fullName}
-                  onChangeText={(text) => setFormData({ ...formData, fullName: text })}
-                  placeholder="John Mokoena"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                />
-              </View>
+                  <View className="mb-4">
+                    <Text className="text-sm font-medium text-gray-700 mb-1">First Name *</Text>
+                    <TextInput
+                      value={firstName}
+                      onChangeText={setFirstName}
+                      placeholder="John"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                    />
+                  </View>
 
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">ID Number *</Text>
-                <TextInput
-                  value={formData.idNumber}
-                  onChangeText={(text) => setFormData({ ...formData, idNumber: text })}
-                  placeholder="9001015800084"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                  keyboardType="numeric"
-                  maxLength={13}
-                />
-              </View>
+                  <View className="mb-4">
+                    <Text className="text-sm font-medium text-gray-700 mb-1">Last Name *</Text>
+                    <TextInput
+                      value={lastName}
+                      onChangeText={setLastName}
+                      placeholder="Mokoena"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                    />
+                  </View>
 
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">Phone Number *</Text>
-                <TextInput
-                  value={formData.phoneNumber}
-                  onChangeText={(text) => setFormData({ ...formData, phoneNumber: text })}
-                  placeholder="073 456 7890"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                  keyboardType="phone-pad"
-                />
-              </View>
+                  <View className="mb-4">
+                    <Text className="text-sm font-medium text-gray-700 mb-1">Email Address *</Text>
+                    <TextInput
+                      value={email}
+                      onChangeText={setEmail}
+                      placeholder="john@example.com"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                  </View>
 
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">
-                  Email (Optional)
-                </Text>
-                <TextInput
-                  value={formData.email}
-                  onChangeText={(text) => setFormData({ ...formData, email: text })}
-                  placeholder="john@example.com"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-              </View>
-            </View>
+                  <View className="mb-4">
+                    <Text className="text-sm font-medium text-gray-700 mb-1">Password *</Text>
+                    <TextInput
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder="Enter a secure password"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                      secureTextEntry
+                    />
+                  </View>
 
-            {/* Work Location */}
-            <View className="mb-6">
-              <Text className="text-lg font-semibold text-gray-800 mb-4">Work Location</Text>
-
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">
-                  Preferred Location *
-                </Text>
-                <View className="border border-gray-300 rounded-lg">
-                  <Picker
-                    selectedValue={formData.preferredLocation}
-                    onValueChange={(value) =>
-                      setFormData({ ...formData, preferredLocation: value })
-                    }
-                  >
-                    <Picker.Item label="Select a location" value="" />
-                    {locations.map((location) => (
-                      <Picker.Item
-                        key={location.id}
-                        label={`${location.name} - ${location.address}`}
-                        value={location.id}
-                      />
-                    ))}
-                  </Picker>
+                  <View className="mb-4">
+                    <Text className="text-sm font-medium text-gray-700 mb-1">
+                      Phone Number (Optional)
+                    </Text>
+                    <TextInput
+                      value={phoneNumber}
+                      onChangeText={setPhoneNumber}
+                      placeholder="+27734567890"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                      keyboardType="phone-pad"
+                    />
+                  </View>
                 </View>
-              </View>
-            </View>
+              </>
+            ) : (
+              <>
+                {/* Verification Code */}
+                <View className="mb-6">
+                  <Text className="text-lg font-semibold text-gray-800 mb-4">
+                    Email Verification
+                  </Text>
+                  <Text className="text-sm text-gray-600 mb-4">
+                    We've sent a verification code to {email}. Please enter it below.
+                  </Text>
 
-            {/* Banking Details */}
-            <View className="mb-6">
-              <Text className="text-lg font-semibold text-gray-800 mb-2">
-                Banking Details (Optional)
-              </Text>
-              <Text className="text-xs text-gray-500 mb-4">
-                You can add or update these later
-              </Text>
-
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">Bank Name</Text>
-                <View className="border border-gray-300 rounded-lg">
-                  <Picker
-                    selectedValue={formData.bankName}
-                    onValueChange={(value) => setFormData({ ...formData, bankName: value })}
-                  >
-                    <Picker.Item label="Select your bank" value="" />
-                    {banks.map((bank) => (
-                      <Picker.Item key={bank.value} label={bank.label} value={bank.value} />
-                    ))}
-                  </Picker>
+                  <View className="mb-4">
+                    <Text className="text-sm font-medium text-gray-700 mb-1">Verification Code *</Text>
+                    <TextInput
+                      value={code}
+                      onChangeText={setCode}
+                      placeholder="Enter 6-digit code"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                      keyboardType="numeric"
+                      maxLength={6}
+                    />
+                  </View>
                 </View>
-              </View>
-
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">Account Number</Text>
-                <TextInput
-                  value={formData.accountNumber}
-                  onChangeText={(text) => setFormData({ ...formData, accountNumber: text })}
-                  placeholder="1234567890"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                  keyboardType="numeric"
-                />
-              </View>
-
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">Account Type</Text>
-                <View className="border border-gray-300 rounded-lg">
-                  <Picker
-                    selectedValue={formData.accountType}
-                    onValueChange={(value) => setFormData({ ...formData, accountType: value })}
-                  >
-                    <Picker.Item label="Select account type" value="" />
-                    <Picker.Item label="Savings" value="savings" />
-                    <Picker.Item label="Cheque" value="cheque" />
-                    <Picker.Item label="Transmission" value="transmission" />
-                  </Picker>
-                </View>
-              </View>
-
-              <View className="mb-4">
-                <Text className="text-sm font-medium text-gray-700 mb-1">Branch Code</Text>
-                <TextInput
-                  value={formData.branchCode}
-                  onChangeText={(text) => setFormData({ ...formData, branchCode: text })}
-                  placeholder="250655"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
+              </>
+            )}
 
             {/* Submit Button */}
             <TouchableOpacity
-              onPress={handleSubmit}
-              style={{ backgroundColor: '#5B94D3' }}
+              onPress={pendingVerification ? handleVerify : handleSignUp}
+              disabled={isLoading}
+              style={{ backgroundColor: isLoading ? '#9CA3AF' : '#5B94D3' }}
               className="w-full py-4 rounded-lg mb-4"
             >
               <Text className="text-white text-center font-semibold text-base">
-                Submit Registration
+                {isLoading
+                  ? pendingVerification ? 'Verifying...' : 'Creating Account...'
+                  : pendingVerification ? 'Verify Email' : 'Create Account'}
               </Text>
             </TouchableOpacity>
 

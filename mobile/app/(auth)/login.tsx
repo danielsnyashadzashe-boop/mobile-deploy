@@ -11,18 +11,41 @@ import {
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSignIn } from '@clerk/clerk-expo';
 import { TippaLogo } from '../../components/TippaLogo';
 
 export default function LoginScreen() {
-  const [guardId, setGuardId] = useState('');
-  const [pin, setPin] = useState('');
+  const { signIn, setActive, isLoaded } = useSignIn();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = () => {
-    // Simple mock authentication
-    if (guardId === 'NG001' && pin === '1234') {
-      router.replace('/(tabs)/dashboard');
-    } else {
-      Alert.alert('Login Failed', 'Invalid credentials. Please try again.');
+  const handleLogin = async () => {
+    if (!isLoaded) return;
+
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter your email and password');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const signInAttempt = await signIn.create({
+        identifier: email,
+        password,
+      });
+
+      if (signInAttempt.status === 'complete') {
+        await setActive({ session: signInAttempt.createdSessionId });
+        router.replace('/(tabs)/dashboard');
+      } else {
+        Alert.alert('Error', 'Sign-in process incomplete. Please try again.');
+      }
+    } catch (err: any) {
+      Alert.alert('Login Failed', err.errors?.[0]?.message || 'Invalid credentials. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -50,42 +73,43 @@ export default function LoginScreen() {
             <View className="space-y-4">
               <View>
                 <Text className="text-sm font-medium text-gray-700 mb-1">
-                  Guard ID / Phone Number
+                  Email Address
                 </Text>
                 <TextInput
-                  value={guardId}
-                  onChangeText={setGuardId}
-                  placeholder="Enter your Guard ID"
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Enter your email"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg text-base"
                   autoCapitalize="none"
                   autoCorrect={false}
+                  keyboardType="email-address"
                 />
               </View>
 
               <View>
                 <Text className="text-sm font-medium text-gray-700 mb-1">
-                  PIN / Password
+                  Password
                 </Text>
                 <TextInput
-                  value={pin}
-                  onChangeText={setPin}
-                  placeholder="Enter your PIN"
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Enter your password"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg text-base"
                   secureTextEntry
-                  keyboardType="numeric"
                 />
                 <TouchableOpacity className="mt-2">
-                  <Text style={{ color: '#5B94D3' }} className="text-xs">Forgot PIN/Password?</Text>
+                  <Text style={{ color: '#5B94D3' }} className="text-xs">Forgot Password?</Text>
                 </TouchableOpacity>
               </View>
 
               <TouchableOpacity
                 onPress={handleLogin}
-                style={{ backgroundColor: '#5B94D3' }}
+                disabled={isLoading}
+                style={{ backgroundColor: isLoading ? '#9CA3AF' : '#5B94D3' }}
                 className="w-full py-4 rounded-lg mt-6"
               >
                 <Text className="text-white text-center font-semibold text-base">
-                  Login
+                  {isLoading ? 'Signing In...' : 'Login'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -112,7 +136,7 @@ export default function LoginScreen() {
             {/* Demo Hint */}
             <View className="mt-8 p-4 bg-gray-50 rounded-lg">
               <Text className="text-xs text-gray-600 text-center">
-                Demo Login: Guard ID: NG001, PIN: 1234
+                Sign in with your Clerk account credentials
               </Text>
             </View>
           </View>
