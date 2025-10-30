@@ -47,8 +47,9 @@ export default function ProfileScreen() {
           onPress: async () => {
             try {
               await signOut();
-              router.replace('/(auth)/login');
+              router.replace('/(auth)/sign-in');
             } catch (error) {
+              console.error('Sign out error:', error);
               Alert.alert('Error', 'Failed to sign out. Please try again.');
             }
           }
@@ -76,12 +77,20 @@ export default function ProfileScreen() {
 
         {/* Profile Card */}
         <View className="bg-white mx-4 mt-4 rounded-xl p-6 shadow-sm items-center">
-          <View style={{ backgroundColor: '#5B94D333' }} className="w-24 h-24 rounded-full items-center justify-center mb-4">
-            <Text style={{ color: '#5B94D3' }} className="text-3xl font-bold">
-              {mockCarGuard.name.split(' ').map(n => n[0]).join('')}
-            </Text>
-          </View>
-          
+          {user?.imageUrl ? (
+            <Image
+              source={{ uri: user.imageUrl }}
+              style={{ width: 96, height: 96, borderRadius: 48 }}
+              className="mb-4"
+            />
+          ) : (
+            <View style={{ backgroundColor: '#5B94D333' }} className="w-24 h-24 rounded-full items-center justify-center mb-4">
+              <Text style={{ color: '#5B94D3' }} className="text-3xl font-bold">
+                {(user?.fullName || mockCarGuard.name).split(' ').map(n => n[0]).join('')}
+              </Text>
+            </View>
+          )}
+
           <Text className="text-xl font-bold text-gray-900">{user?.fullName || mockCarGuard.name}</Text>
           <Text className="text-sm text-gray-500">{user?.primaryEmailAddress?.emailAddress || 'Guard ID: ' + mockCarGuard.id}</Text>
           

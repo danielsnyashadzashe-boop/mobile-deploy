@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Modal,
   Alert,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,8 +20,31 @@ import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
 import { mockCarGuard, mockTransactions, formatCurrency } from '../../data/mockData';
 import { TippaLogo } from '../../components/TippaLogo';
+import { useUser } from '@clerk/clerk-expo';
+
+interface GuardData {
+  id: string;
+  guardId: string;
+  name: string;
+  surname: string;
+  email: string;
+  phone: string;
+  balance: number;
+  lifetimeEarnings: number;
+  status: string;
+  qrCode: string;
+}
+
+interface QRCodeData {
+  guardId: string;
+  guardName: string;
+  qrCode: string; // The Netcash PayNow URL
+  balance: number;
+  status: string;
+}
 
 export default function DashboardScreen() {
+  const { user } = useUser();
   const [refreshing, setRefreshing] = useState(false);
   const [showAirtimeModal, setShowAirtimeModal] = useState(false);
   const [showElectricityModal, setShowElectricityModal] = useState(false);
@@ -29,14 +53,68 @@ export default function DashboardScreen() {
   const [electricityAmount, setElectricityAmount] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [meterNumber, setMeterNumber] = useState('');
+  const [guardData, setGuardData] = useState<GuardData | null>(null);
+  const [qrCodeData, setQRCodeData] = useState<QRCodeData | null>(null);
+  const [loading, setLoading] = useState(true);
   const qrViewRef = useRef(null);
+
+  // Fetch guard data and QR code
+  useEffect(() => {
+    loadGuardData();
+  }, [user]);
+
+  const loadGuardData = async () => {
+    if (!user?.primaryEmailAddress?.emailAddress) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+      const email = user.primaryEmailAddress.emailAddress;
+
+      console.log('🔍 Fetching guard data for:', email);
+
+      // Fetch guard details
+      const guardResponse = await fetch(`${apiUrl}/api/guards/by-email/${encodeURIComponent(email)}`);
+
+      if (!guardResponse.ok) {
+        console.log('❌ Guard not found, using mock data');
+        setLoading(false);
+        return;
+      }
+
+      const guardResult = await guardResponse.json();
+
+      if (guardResult.success && guardResult.data) {
+        const guard = guardResult.data;
+        setGuardData(guard);
+
+        console.log('✅ Guard data loaded:', guard.guardId);
+
+        // Fetch QR code URL
+        const qrResponse = await fetch(`${apiUrl}/api/qr/${guard.guardId}`);
+
+        if (qrResponse.ok) {
+          const qrResult = await qrResponse.json();
+
+          if (qrResult.success && qrResult.data) {
+            setQRCodeData(qrResult.data);
+            console.log('✅ QR code loaded');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error loading guard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 2000);
-  }, []);
+    loadGuardData().finally(() => setRefreshing(false));
+  }, [user]);
 
   const downloadQRCode = async () => {
     if (!qrViewRef.current) {
@@ -48,22 +126,24 @@ export default function DashboardScreen() {
       setDownloadingQR(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      // Add a small delay to ensure QR code is fully rendered
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Add delay to ensure QR code is fully rendered
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Capture QR code at 300 DPI for high-quality printing
       // 300 DPI = ~1181 pixels for 4-inch print size
       const uri = await captureRef(qrViewRef.current, {
         format: 'png',
         quality: 1.0, // Maximum quality
-        width: 1181,  // 300 DPI equivalent for ~4 inch print
-        height: 1181,
+        width: 1200,  // High resolution for printing
+        height: 1200,
         result: 'tmpfile', // Use tmpfile for better compatibility
       });
 
       // Create filename with guard info
-      const guardName = mockCarGuard.name.replace(/[^a-zA-Z0-9]/g, '_');
-      const filename = `TippaQR_${guardName}_${mockCarGuard.id}_300DPI.png`;
+      const displayName = guardData ? `${guardData.name}_${guardData.surname}` : (user?.fullName || mockCarGuard.name);
+      const guardName = displayName.replace(/[^a-zA-Z0-9]/g, '_');
+      const guardId = guardData?.guardId || mockCarGuard.id;
+      const filename = `TippaQR_${guardName}_${guardId}_300DPI.png`;
       const downloadPath = `${FileSystem.documentDirectory}${filename}`;
 
       // Copy to permanent location (use copyAsync instead of moveAsync)
@@ -113,7 +193,7 @@ export default function DashboardScreen() {
 
   const handleQuickAction = (action: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
+
     switch (action) {
       case 'airtime':
         setShowAirtimeModal(true);
@@ -121,16 +201,26 @@ export default function DashboardScreen() {
       case 'electricity':
         setShowElectricityModal(true);
         break;
-      case 'payout':
-        Alert.alert('Payout Request', 'Navigate to Payouts tab to request a payout');
-        break;
-      case 'transfer':
-        Alert.alert('Transfer', 'Transfer feature coming soon!');
-        break;
     }
   };
 
   const recentTransactions = mockTransactions.slice(0, 3);
+
+  // Calculate ins and outs from transactions
+  const calculateInsAndOuts = () => {
+    const income = mockTransactions
+      .filter(t => t.amount > 0)
+      .reduce((sum, t) => sum + t.amount, 0);
+    const expenses = mockTransactions
+      .filter(t => t.amount < 0)
+      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+    return { income, expenses };
+  };
+
+  const { income, expenses } = calculateInsAndOuts();
+  const maxAmount = Math.max(income, expenses);
+  const incomeWidth = maxAmount > 0 ? (income / maxAmount) * 100 : 0;
+  const expenseWidth = maxAmount > 0 ? (expenses / maxAmount) * 100 : 0;
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top', 'left', 'right']}>
@@ -154,46 +244,69 @@ export default function DashboardScreen() {
           {/* Welcome Message */}
           <View className="items-center mb-6">
             <Text className="text-white/80 text-sm">Welcome back,</Text>
-            <Text className="text-white text-2xl font-bold">{mockCarGuard.name}</Text>
+            <Text className="text-white text-2xl font-bold">
+              {guardData ? `${guardData.name} ${guardData.surname}` : (user?.fullName || mockCarGuard.name)}
+            </Text>
           </View>
 
           {/* QR Code Section - Prominent */}
           <View className="bg-white rounded-2xl p-6 shadow-md items-center">
-            <Text className="text-lg font-semibold text-gray-900 mb-4">
-              Your QR Code
-            </Text>
-            <Text className="text-sm text-gray-600 mb-4 text-center">
-              Show this to customers for tips
-            </Text>
-            <Text className="text-xs text-gray-500 mb-4">
-              This is your permanent QR code
-            </Text>
-            <View 
-              ref={qrViewRef} 
-              className="p-4 bg-white rounded-xl border-2 border-gray-100"
-              style={{ backgroundColor: '#ffffff' }}
-            >
-              <QRCode
-                value={`tippa://guard/${mockCarGuard.id}`}
-                size={200}
-                color="#5B94D3"
-                backgroundColor="#ffffff"
-                enableLinearGradient={false}
-                logo={undefined}
-              />
-            </View>
-            
-            {/* Guard Info */}
-            <View className="items-center mt-4">
-              <Text className="text-lg font-bold text-gray-900">{mockCarGuard.name}</Text>
-              <Text className="text-sm text-gray-500">ID: {mockCarGuard.id}</Text>
-              <Text className="text-xs text-gray-400 mt-1">Scan to leave a tip</Text>
-            </View>
+            {loading ? (
+              <View className="py-20">
+                <ActivityIndicator size="large" color="#5B94D3" />
+                <Text className="text-sm text-gray-500 mt-4">Loading QR code...</Text>
+              </View>
+            ) : (
+              <>
+                <Text className="text-lg font-semibold text-gray-900 mb-4">
+                  Your QR Code
+                </Text>
+                <Text className="text-sm text-gray-600 mb-4 text-center">
+                  Show this to customers for tips
+                </Text>
+                <Text className="text-xs text-gray-500 mb-4">
+                  {qrCodeData ? 'Netcash PayNow QR Code' : 'Permanent QR Code'}
+                </Text>
+                <View
+                  ref={qrViewRef}
+                  collapsable={false}
+                  style={{
+                    backgroundColor: '#ffffff',
+                    padding: 20,
+                    borderRadius: 12,
+                    borderWidth: 2,
+                    borderColor: '#E5E7EB',
+                  }}
+                >
+                  <QRCode
+                    value={qrCodeData?.qrCode || `tippa://guard/${guardData?.guardId || mockCarGuard.id}`}
+                    size={200}
+                    color="#404040"
+                    backgroundColor="#ffffff"
+                    enableLinearGradient={false}
+                    logo={undefined}
+                  />
+                </View>
 
-            <View className="flex-row items-center mt-3 px-3 py-1 bg-green-50 rounded-full">
-              <View className="w-2 h-2 bg-tippa-success rounded-full mr-2" />
-              <Text className="text-xs text-green-700">Active</Text>
-            </View>
+                {/* Guard Info */}
+                <View className="items-center mt-4">
+                  <Text className="text-lg font-bold text-gray-900">
+                    {guardData ? `${guardData.name} ${guardData.surname}` : (user?.fullName || mockCarGuard.name)}
+                  </Text>
+                  <Text className="text-sm text-gray-500">
+                    ID: {guardData?.guardId || mockCarGuard.id}
+                  </Text>
+                  <Text className="text-xs text-gray-400 mt-1">Scan to leave a tip</Text>
+                </View>
+
+                <View className="flex-row items-center mt-3 px-3 py-1 bg-green-50 rounded-full">
+                  <View className="w-2 h-2 bg-tippa-success rounded-full mr-2" />
+                  <Text className="text-xs text-green-700">
+                    {guardData?.status || 'Active'}
+                  </Text>
+                </View>
+              </>
+            )}
 
             {/* Download Button */}
             <TouchableOpacity
@@ -226,7 +339,7 @@ export default function DashboardScreen() {
           <View className="bg-white rounded-2xl p-4 shadow-lg">
             <Text className="text-gray-600 text-sm mb-1">Available Balance</Text>
             <Text className="text-3xl font-bold text-gray-900">
-              {formatCurrency(mockCarGuard.balance)}
+              {formatCurrency(guardData?.balance || mockCarGuard.balance)}
             </Text>
             <View className="flex-row justify-between mt-4">
               <View>
@@ -268,82 +381,71 @@ export default function DashboardScreen() {
               <Text className="text-sm font-medium text-gray-900">Buy Electricity</Text>
               <Text className="text-xs text-gray-500">Prepaid tokens</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => handleQuickAction('payout')}
-              className="bg-white rounded-xl p-4 shadow-sm mb-4"
-              style={{ width: '48%' }}
-            >
-              <View style={{ backgroundColor: '#DEFF0033' }} className="w-10 h-10 rounded-full items-center justify-center mb-2">
-                <Ionicons name="cash-outline" size={20} color="#DEFF00" />
-              </View>
-              <Text className="text-sm font-medium text-gray-900">Request Payout</Text>
-              <Text className="text-xs text-gray-500">To bank or cash</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => handleQuickAction('transfer')}
-              className="bg-white rounded-xl p-4 shadow-sm mb-4"
-              style={{ width: '48%' }}
-            >
-              <View className="bg-purple-100 w-10 h-10 rounded-full items-center justify-center mb-2">
-                <Ionicons name="swap-horizontal-outline" size={20} color="#9333EA" />
-              </View>
-              <Text className="text-sm font-medium text-gray-900">Transfer</Text>
-              <Text className="text-xs text-gray-500">Send to others</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Recent Transactions */}
+        {/* Money Flow Chart */}
         <View className="px-6 mt-6 mb-8">
           <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-lg font-semibold text-gray-900">Recent Activity</Text>
+            <Text className="text-lg font-semibold text-gray-900">Money Flow</Text>
             <TouchableOpacity>
               <Text className="text-sm text-tippa-secondary">See all</Text>
             </TouchableOpacity>
           </View>
 
-          <View className="bg-white rounded-xl shadow-sm">
-            {recentTransactions.map((transaction, index) => (
-              <View
-                key={transaction.id}
-                className={`flex-row items-center justify-between p-4 ${
-                  index < recentTransactions.length - 1 ? 'border-b border-gray-100' : ''
-                }`}
-              >
-                <View className="flex-row items-center flex-1">
-                  <View
-                    className={`w-10 h-10 rounded-full items-center justify-center`}
-                    style={{
-                      backgroundColor: transaction.type === 'tip' ? '#10B98133' : '#B0151933'
-                    }}
-                  >
-                    <Ionicons
-                      name={transaction.type === 'tip' ? 'arrow-down' : 'arrow-up'}
-                      size={20}
-                      color={transaction.type === 'tip' ? '#10B981' : '#B01519'}
-                    />
-                  </View>
-                  <View className="ml-3 flex-1">
-                    <Text className="text-sm font-medium text-gray-900">
-                      {transaction.description}
-                    </Text>
-                    <Text className="text-xs text-gray-500">
-                      {transaction.date} at {transaction.time}
-                    </Text>
-                  </View>
+          <View className="bg-white rounded-xl shadow-sm p-6">
+            {/* Income Bar */}
+            <View className="mb-6">
+              <View className="flex-row justify-between items-center mb-2">
+                <View className="flex-row items-center">
+                  <View className="w-3 h-3 rounded-full bg-tippa-success mr-2" />
+                  <Text className="text-sm font-medium text-gray-700">Income</Text>
                 </View>
-                <Text
-                  className="text-base font-semibold"
-                  style={{
-                    color: transaction.amount > 0 ? '#10B981' : '#B01519'
-                  }}
-                >
-                  {transaction.amount > 0 ? '+' : ''}{formatCurrency(Math.abs(transaction.amount))}
+                <Text className="text-base font-bold text-tippa-success">
+                  +{formatCurrency(income)}
                 </Text>
               </View>
-            ))}
+              <View className="h-8 bg-gray-100 rounded-lg overflow-hidden">
+                <View
+                  className="h-full bg-tippa-success rounded-lg"
+                  style={{ width: `${incomeWidth}%` }}
+                />
+              </View>
+            </View>
+
+            {/* Expenses Bar */}
+            <View>
+              <View className="flex-row justify-between items-center mb-2">
+                <View className="flex-row items-center">
+                  <View className="w-3 h-3 rounded-full bg-tippa-danger mr-2" />
+                  <Text className="text-sm font-medium text-gray-700">Expenses</Text>
+                </View>
+                <Text className="text-base font-bold text-tippa-danger">
+                  -{formatCurrency(expenses)}
+                </Text>
+              </View>
+              <View className="h-8 bg-gray-100 rounded-lg overflow-hidden">
+                <View
+                  className="h-full bg-tippa-danger rounded-lg"
+                  style={{ width: `${expenseWidth}%` }}
+                />
+              </View>
+            </View>
+
+            {/* Net Summary */}
+            <View className="mt-6 pt-6 border-t border-gray-100">
+              <View className="flex-row justify-between items-center">
+                <Text className="text-sm font-medium text-gray-600">Net Flow</Text>
+                <Text
+                  className="text-lg font-bold"
+                  style={{
+                    color: income - expenses >= 0 ? '#10B981' : '#B01519'
+                  }}
+                >
+                  {income - expenses >= 0 ? '+' : ''}{formatCurrency(income - expenses)}
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -389,7 +491,7 @@ export default function DashboardScreen() {
               />
             </View>
             <Text className="text-xs text-gray-500 mb-6">
-              Available balance: {formatCurrency(mockCarGuard.balance)}
+              Available balance: {formatCurrency(guardData?.balance || mockCarGuard.balance)}
             </Text>
 
             {/* Quick Amount Buttons */}
@@ -466,7 +568,7 @@ export default function DashboardScreen() {
               />
             </View>
             <Text className="text-xs text-gray-500 mb-6">
-              Available balance: {formatCurrency(mockCarGuard.balance)}
+              Available balance: {formatCurrency(guardData?.balance || mockCarGuard.balance)}
             </Text>
 
             {/* Quick Amount Buttons */}

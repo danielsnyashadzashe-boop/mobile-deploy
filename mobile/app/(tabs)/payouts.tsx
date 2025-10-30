@@ -23,7 +23,6 @@ export default function PayoutsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showElectricityModal, setShowElectricityModal] = useState(false);
   const [payoutType, setPayoutType] = useState('bank_transfer');
   const [amount, setAmount] = useState('');
   const [autoPayoutEnabled, setAutoPayoutEnabled] = useState(true);
@@ -50,15 +49,6 @@ export default function PayoutsScreen() {
   }, []);
 
   const handleRequestPayout = () => {
-    // Handle electricity purchases through Flash API
-    if (payoutType === 'electricity') {
-      setShowRequestModal(false);
-      setAmount('');
-      setShowElectricityModal(true);
-      return;
-    }
-
-    // Handle other payout types with original logic
     if (!amount || parseFloat(amount) <= 0) {
       Alert.alert('Error', 'Please enter a valid amount');
       return;
@@ -440,7 +430,7 @@ export default function PayoutsScreen() {
             {/* Payout Type Selection */}
             <Text className="text-sm font-medium text-gray-700 mb-3">Payout Method</Text>
             <View className="flex-row flex-wrap mb-6">
-              {['bank_transfer', 'cash', 'airtime', 'electricity'].map((type) => (
+              {['bank_transfer', 'cash'].map((type) => (
                 <TouchableOpacity
                   key={type}
                   onPress={() => setPayoutType(type)}
