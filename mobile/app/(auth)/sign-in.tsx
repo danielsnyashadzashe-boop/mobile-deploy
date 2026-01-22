@@ -222,14 +222,15 @@ export default function SignInScreen() {
             )}
           </TouchableOpacity>
 
-          <View style={styles.footer}>
+          {/* SIGN UP LINK COMMENTED OUT - Guards are added via admin/backend only */}
+          {/* <View style={styles.footer}>
             <Text style={styles.footerText}>Don't have an account? </Text>
             <Link href="/(auth)/sign-up" asChild>
               <TouchableOpacity disabled={loading}>
                 <Text style={styles.linkText}>Sign Up</Text>
               </TouchableOpacity>
             </Link>
-          </View>
+          </View> */}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
