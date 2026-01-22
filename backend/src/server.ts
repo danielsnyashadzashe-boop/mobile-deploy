@@ -6,6 +6,8 @@ import uploadRoutes from './routes/upload'
 import guardsRoutes from './routes/guards'
 import qrRoutes from './routes/qr'
 import adminRoutes from './routes/admin'
+import commissionRoutes from './routes/commission'
+import tipsRoutes from './routes/tips'
 
 // Load environment variables
 dotenv.config()
@@ -34,6 +36,8 @@ app.use('/api/upload', uploadRoutes)
 app.use('/api/guards', guardsRoutes)
 app.use('/api/qr', qrRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api', commissionRoutes)
+app.use('/api', tipsRoutes)
 
 // 404 handler
 app.use((req: Request, res: Response) => {

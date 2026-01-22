@@ -21,6 +21,7 @@ import { captureRef } from 'react-native-view-shot';
 import { mockCarGuard, mockTransactions, formatCurrency } from '../../data/mockData';
 import { TippaLogo } from '../../components/TippaLogo';
 import { useUser } from '@clerk/clerk-expo';
+import { commissionService, CommissionInfo } from '../../services/commissionService';
 
 interface GuardData {
   id: string;
@@ -57,6 +58,9 @@ export default function DashboardScreen() {
   const [qrCodeData, setQRCodeData] = useState<QRCodeData | null>(null);
   const [loading, setLoading] = useState(true);
   const qrViewRef = useRef(null);
+  const [commissionRate, setCommissionRate] = useState(0);
+  const [exampleTip] = useState(20); // Show example for R20 tip
+  const [commissionInfo, setCommissionInfo] = useState<CommissionInfo | null>(null);
 
   // Fetch guard data and QR code
   useEffect(() => {
@@ -103,6 +107,15 @@ export default function DashboardScreen() {
             console.log('✅ QR code loaded');
           }
         }
+
+        // Fetch commission rate
+        const rate = await commissionService.getActiveCommissionRate();
+        setCommissionRate(rate);
+
+        // Calculate example commission
+        const info = commissionService.calculateCommission(exampleTip, rate);
+        setCommissionInfo(info);
+        console.log('✅ Commission rate loaded:', rate + '%');
       }
     } catch (error) {
       console.error('❌ Error loading guard data:', error);
@@ -333,6 +346,29 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           </View>
         </LinearGradient>
+
+        {/* Commission Info Card */}
+        {commissionRate > 0 && commissionInfo && (
+          <View className="px-6 mt-6">
+            <View className="bg-blue-50 rounded-2xl p-4 shadow-sm border border-blue-100">
+              <View className="flex-row items-center mb-2">
+                <Ionicons name="information-circle" size={20} color="#3B82F6" />
+                <Text className="text-blue-900 font-semibold text-base ml-2">
+                  Commission Rate: {commissionRate}%
+                </Text>
+              </View>
+              <Text className="text-sm text-blue-800">
+                For a R{exampleTip.toFixed(2)} tip, you will receive{' '}
+                <Text className="font-bold text-green-600">
+                  R{commissionInfo.guardReceivesAmount.toFixed(2)}
+                </Text>
+              </Text>
+              <Text className="text-xs text-blue-600 mt-1">
+                Commission: R{commissionInfo.commissionAmount.toFixed(2)}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Balance Card - Moved Down */}
         <View className="px-6 mt-6">

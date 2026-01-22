@@ -294,6 +294,12 @@ export const mockTransactions: Transaction[] = [
     date: '2025-09-02',
     time: '14:30',
     status: 'completed',
+    metadata: {
+      originalAmount: 26.32,
+      commissionRate: 5,
+      commissionAmount: 1.32,
+      guardReceivesAmount: 25.00
+    }
   },
   {
     id: 'tx2',
@@ -306,6 +312,12 @@ export const mockTransactions: Transaction[] = [
     date: '2025-09-02',
     time: '15:45',
     status: 'completed',
+    metadata: {
+      originalAmount: 15.79,
+      commissionRate: 5,
+      commissionAmount: 0.79,
+      guardReceivesAmount: 15.00
+    }
   },
   {
     id: 'tx3',
@@ -330,6 +342,12 @@ export const mockTransactions: Transaction[] = [
     amount: 30,
     balance: 455.50,
     description: 'Tip from Emma Wilson',
+    metadata: {
+      originalAmount: 31.58,
+      commissionRate: 5,
+      commissionAmount: 1.58,
+      guardReceivesAmount: 30.00
+    },
     date: '2025-09-01',
     time: '11:20',
     status: 'completed',

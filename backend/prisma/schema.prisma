@@ -601,10 +601,32 @@ model Incident {
 model Commission {
   id                String           @id @default(auto()) @map("_id") @db.ObjectId
   guardId           String           @db.ObjectId
+  transactionId     String?          @db.ObjectId
   amount            Float
+  rate              Float
+  originalAmount    Float
+  guardReceives     Float
+  type              String           @default("TIP")
   createdAt         DateTime         @default(now())
 
   guard             CarGuard         @relation(fields: [guardId], references: [id])
+}
+
+model CommissionSetting {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  settingId         String           @unique
+  name              String
+  description       String?
+  percentage        Float
+  isActive          Boolean          @default(false)
+  appliesTo         String           @default("TIPS") // TIPS, PAYOUTS, ALL
+  setByAdminId      String?          @db.ObjectId
+  setByAdminName    String?
+  setByAdminEmail   String?
+  effectiveFrom     DateTime         @default(now())
+  effectiveUntil    DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 }
 
 model Notification {

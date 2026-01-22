@@ -176,7 +176,8 @@ export default function HistoryScreen() {
 
   const renderTransaction = ({ item }: any) => {
     const icon = getTransactionIcon(item.type);
-    
+    const hasCommission = item.metadata?.commissionAmount && item.metadata.commissionAmount > 0;
+
     return (
       <TouchableOpacity className="bg-white border-b border-gray-100 px-4 py-3">
         <View className="flex-row items-center">
@@ -184,7 +185,7 @@ export default function HistoryScreen() {
             style={{ backgroundColor: `${icon.color}20` }}>
             <Ionicons name={icon.name as any} size={16} color={icon.color} />
           </View>
-          
+
           <View className="flex-1">
             <View className="flex-row items-center justify-between">
               <Text className="text-sm font-semibold text-gray-900">
@@ -209,6 +210,24 @@ export default function HistoryScreen() {
               <Text className="text-xs text-gray-400 mt-1">
                 Ref: {item.reference}
               </Text>
+            )}
+
+            {/* Commission Breakdown */}
+            {hasCommission && (
+              <View className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-100">
+                <View className="flex-row items-center mb-1">
+                  <View className="bg-blue-500 px-2 py-0.5 rounded">
+                    <Text className="text-xs font-semibold text-white">
+                      {item.metadata.commissionRate}% commission
+                    </Text>
+                  </View>
+                </View>
+                <Text className="text-xs text-blue-800">
+                  Original: {formatCurrency(item.metadata.originalAmount)} |
+                  Commission: -{formatCurrency(item.metadata.commissionAmount)} |
+                  Received: {formatCurrency(item.metadata.guardReceivesAmount)}
+                </Text>
+              </View>
             )}
           </View>
         </View>
