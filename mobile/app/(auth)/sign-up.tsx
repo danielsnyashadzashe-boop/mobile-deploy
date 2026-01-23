@@ -81,7 +81,8 @@ export default function SignUpScreen() {
       // Check if sign up is complete (no verification needed)
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
-        router.replace('/(auth)/complete-registration');
+        // SIMPLIFIED: Go directly to app, skip registration flow
+        router.replace('/(tabs)');
         return;
       }
 
@@ -135,7 +136,8 @@ export default function SignUpScreen() {
       // If status is complete, create session
       if (completeSignUp.status === 'complete' && completeSignUp.createdSessionId) {
         await setActive({ session: completeSignUp.createdSessionId });
-        router.replace('/(auth)/complete-registration');
+        // SIMPLIFIED: Go directly to app, skip registration flow
+        router.replace('/(tabs)');
         return;
       }
 
@@ -146,7 +148,8 @@ export default function SignUpScreen() {
         // Check if there's a session we can activate
         if (completeSignUp.createdSessionId) {
           await setActive({ session: completeSignUp.createdSessionId });
-          router.replace('/(auth)/complete-registration');
+          // SIMPLIFIED: Go directly to app, skip registration flow
+        router.replace('/(tabs)');
           return;
         }
 
@@ -174,7 +177,8 @@ export default function SignUpScreen() {
 
           if (signUp.status === 'complete' && signUp.createdSessionId) {
             await setActive({ session: signUp.createdSessionId });
-            router.replace('/(auth)/complete-registration');
+            // SIMPLIFIED: Go directly to app, skip registration flow
+        router.replace('/(tabs)');
             return;
           }
 

@@ -10,54 +10,21 @@ export default function Index() {
   const [redirectTo, setRedirectTo] = useState<string | null>(null);
 
   useEffect(() => {
-    async function checkRegistrationStatus() {
+    async function checkAuthStatus() {
       if (!isSignedIn || !user) {
+        // Not signed in, go to sign-in
         setRedirectTo('/(auth)/sign-in');
         setChecking(false);
         return;
       }
 
-      try {
-        const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-        const response = await fetch(`${apiUrl}/api/registration/check`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            clerkUserId: user.id,
-            email: user.primaryEmailAddress?.emailAddress
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-
-          // Route based on registration status
-          if (!data.hasCompletedRegistration) {
-            setRedirectTo('/(auth)/complete-registration');
-          } else if (data.currentStatus === 'pending_approval') {
-            setRedirectTo('/(auth)/registration-pending');
-          } else if (data.canAccessApp) {
-            // If user can access app (APPROVED or has active CarGuard), go to dashboard
-            setRedirectTo('/(tabs)');
-          } else {
-            // Fallback to complete registration
-            setRedirectTo('/(auth)/complete-registration');
-          }
-        } else {
-          // If API call fails, allow access to app
-          setRedirectTo('/(tabs)');
-        }
-      } catch (error) {
-        console.error('Error checking registration:', error);
-        // On error, allow access to app
-        setRedirectTo('/(tabs)');
-      } finally {
-        setChecking(false);
-      }
+      // SIMPLIFIED: Skip registration check, go directly to app
+      setRedirectTo('/(tabs)');
+      setChecking(false);
     }
 
     if (isLoaded) {
-      checkRegistrationStatus();
+      checkAuthStatus();
     }
   }, [isSignedIn, isLoaded, user]);
 

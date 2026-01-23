@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,14 +13,27 @@ import {
   TouchableWithoutFeedback,
   Platform,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { mockPayouts, mockCarGuard, formatCurrency, formatDate } from '../../data/mockData';
-// import ElectricityPurchaseModal from '../../components/flash/ElectricityPurchaseModal';
+import { useUser } from '@clerk/clerk-expo';
+import { formatCurrency, formatDate } from '../../data/mockData';
+import apiService from '../../services/apiService';
+import { Payout } from '../../types';
+
+interface GuardData {
+  guardId: string;
+  balance: number;
+}
 
 export default function PayoutsScreen() {
+  const { user } = useUser();
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [guardData, setGuardData] = useState<GuardData | null>(null);
+  const [payouts, setPayouts] = useState<Payout[]>([]);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [payoutType, setPayoutType] = useState('bank_transfer');
@@ -41,20 +54,64 @@ export default function PayoutsScreen() {
   const payoutThreshold = 500.00;
   const nextPayoutDate = '2025-09-05';
 
-  const onRefresh = React.useCallback(() => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 2000);
+  // Load guard data and payouts from API
+  useEffect(() => {
+    loadData();
   }, []);
 
-  const handleRequestPayout = () => {
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const email = user?.primaryEmailAddress?.emailAddress;
+      if (!email) {
+        setError('No email found. Please log in again.');
+        setLoading(false);
+        return;
+      }
+
+      // Fetch guard profile
+      const guard = await apiService.fetchGuardProfile(email);
+      if (!guard) {
+        setError('Guard profile not found. Please contact support.');
+        setLoading(false);
+        return;
+      }
+
+      setGuardData({
+        guardId: guard.id,
+        balance: guard.balance,
+      });
+
+      // Fetch payouts
+      const payoutData = await apiService.fetchPayouts(guard.id);
+      setPayouts(payoutData);
+    } catch (err) {
+      setError('Failed to load data. Please check your connection.');
+      console.error('Error loading payouts:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    loadData().finally(() => setRefreshing(false));
+  }, []);
+
+  const handleRequestPayout = async () => {
     if (!amount || parseFloat(amount) <= 0) {
       Alert.alert('Error', 'Please enter a valid amount');
       return;
     }
-    
-    if (parseFloat(amount) > mockCarGuard.balance) {
+
+    if (!guardData) {
+      Alert.alert('Error', 'Guard data not loaded. Please try again.');
+      return;
+    }
+
+    if (parseFloat(amount) > guardData.balance) {
       Alert.alert('Insufficient Balance', 'You cannot request more than your available balance');
       return;
     }
@@ -64,12 +121,23 @@ export default function PayoutsScreen() {
       `Request ${formatCurrency(parseFloat(amount))} via ${payoutType.replace('_', ' ')}?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Confirm', 
-          onPress: () => {
-            setShowRequestModal(false);
-            setAmount('');
-            Alert.alert('Success', 'Your payout request has been submitted');
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            const result = await apiService.createPayout(
+              guardData.guardId,
+              parseFloat(amount),
+              payoutType as 'bank_transfer' | 'cash'
+            );
+
+            if (result.success) {
+              setShowRequestModal(false);
+              setAmount('');
+              Alert.alert('Success', `Payout request submitted! Voucher: ${result.voucherNumber}`);
+              loadData(); // Refresh data
+            } else {
+              Alert.alert('Error', result.error || 'Failed to submit payout request');
+            }
           }
         }
       ]
@@ -157,7 +225,7 @@ export default function PayoutsScreen() {
   };
 
   // Filter and pagination logic
-  const filteredPayouts = mockPayouts.filter(payout => {
+  const filteredPayouts = payouts.filter(payout => {
     const matchesSearch = payout.voucherNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          payout.type.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = selectedStatus === 'all' || payout.status === selectedStatus;
@@ -170,7 +238,7 @@ export default function PayoutsScreen() {
     currentPage * itemsPerPage
   );
 
-  const progressPercentage = Math.min((mockCarGuard.balance / payoutThreshold) * 100, 100);
+  const progressPercentage = guardData ? Math.min((guardData.balance / payoutThreshold) * 100, 100) : 0;
 
   const getStatusBarHeight = () => {
     if (Platform.OS === 'ios') {
@@ -211,12 +279,23 @@ export default function PayoutsScreen() {
         {/* Simplified Balance Card */}
         <View className="mx-4 mt-4 mb-4">
           <View className="bg-white rounded-xl p-6 shadow-sm">
-            <View className="items-center mb-6">
-              <Text className="text-gray-500 text-sm mb-2">Available for Payout</Text>
-              <Text className="text-gray-900 text-4xl font-bold">
-                {formatCurrency(mockCarGuard.balance)}
-              </Text>
-            </View>
+            {loading ? (
+              <View className="items-center justify-center py-6">
+                <ActivityIndicator size="large" color="#5B94D3" />
+              </View>
+            ) : error ? (
+              <View className="items-center justify-center py-6">
+                <Ionicons name="alert-circle-outline" size={40} color="#EF4444" />
+                <Text className="text-red-500 mt-2 text-center">{error}</Text>
+              </View>
+            ) : (
+              <View className="items-center mb-6">
+                <Text className="text-gray-500 text-sm mb-2">Available for Payout</Text>
+                <Text className="text-gray-900 text-4xl font-bold">
+                  {formatCurrency(guardData?.balance || 0)}
+                </Text>
+              </View>
+            )}
 
             <TouchableOpacity
               onPress={() => setShowRequestModal(true)}
@@ -467,7 +546,7 @@ export default function PayoutsScreen() {
               />
             </View>
             <Text className="text-xs text-gray-500 mb-6">
-              Available balance: {formatCurrency(mockCarGuard.balance)}
+              Available balance: {formatCurrency(guardData?.balance || 0)}
             </Text>
 
             {/* Submit Button */}

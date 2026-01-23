@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,29 +8,79 @@ import {
   Switch,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuth, useUser } from '@clerk/clerk-expo';
-import { mockCarGuard, formatCurrency } from '../../data/mockData';
+import { formatCurrency } from '../../data/mockData';
+import apiService from '../../services/apiService';
+import { CarGuard } from '../../types';
 
 export default function ProfileScreen() {
   const { signOut } = useAuth();
   const { user } = useUser();
   const [isEditing, setIsEditing] = useState(false);
   const [notifications, setNotifications] = useState(true);
+  const [guardData, setGuardData] = useState<CarGuard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [profileData, setProfileData] = useState({
-    name: user?.fullName || mockCarGuard.name,
-    phoneNumber: user?.primaryPhoneNumber?.phoneNumber || mockCarGuard.phoneNumber,
-    email: user?.primaryEmailAddress?.emailAddress || mockCarGuard.email || '',
-    bankName: mockCarGuard.bankDetails?.bankName || '',
-    accountNumber: mockCarGuard.bankDetails?.accountNumber || '',
-    accountType: mockCarGuard.bankDetails?.accountType || '',
-    branchCode: mockCarGuard.bankDetails?.branchCode || '',
+    name: user?.fullName || '',
+    phoneNumber: user?.primaryPhoneNumber?.phoneNumber || '',
+    email: user?.primaryEmailAddress?.emailAddress || '',
+    bankName: '',
+    accountNumber: '',
+    accountType: '',
+    branchCode: '',
   });
 
-  const handleSave = () => {
+  // Load guard data from API
+  useEffect(() => {
+    loadGuardData();
+  }, []);
+
+  const loadGuardData = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const email = user?.primaryEmailAddress?.emailAddress;
+      if (!email) {
+        setError('No email found. Please log in again.');
+        setLoading(false);
+        return;
+      }
+
+      const guard = await apiService.fetchGuardProfile(email);
+      if (!guard) {
+        setError('Guard profile not found. Please contact support.');
+        setLoading(false);
+        return;
+      }
+
+      setGuardData(guard);
+      setProfileData({
+        name: guard.name,
+        phoneNumber: guard.phoneNumber,
+        email: guard.email,
+        bankName: guard.bankDetails?.bankName || '',
+        accountNumber: guard.bankDetails?.accountNumber || '',
+        accountType: guard.bankDetails?.accountType || '',
+        branchCode: guard.bankDetails?.branchCode || '',
+      });
+    } catch (err) {
+      setError('Failed to load profile. Please check your connection.');
+      console.error('Error loading profile:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    // In a real implementation, you would call the API to update the profile
+    // For now, just show success message
     setIsEditing(false);
     Alert.alert('Success', 'Profile updated successfully');
   };
@@ -77,48 +127,61 @@ export default function ProfileScreen() {
 
         {/* Profile Card */}
         <View className="bg-white mx-4 mt-4 rounded-xl p-6 shadow-sm items-center">
-          {user?.imageUrl ? (
-            <Image
-              source={{ uri: user.imageUrl }}
-              style={{ width: 96, height: 96, borderRadius: 48 }}
-              className="mb-4"
-            />
-          ) : (
-            <View style={{ backgroundColor: '#5B94D333' }} className="w-24 h-24 rounded-full items-center justify-center mb-4">
-              <Text style={{ color: '#5B94D3' }} className="text-3xl font-bold">
-                {(user?.fullName || mockCarGuard.name).split(' ').map(n => n[0]).join('')}
-              </Text>
+          {loading ? (
+            <View className="items-center justify-center py-6">
+              <ActivityIndicator size="large" color="#5B94D3" />
             </View>
-          )}
+          ) : error ? (
+            <View className="items-center justify-center py-6">
+              <Ionicons name="alert-circle-outline" size={40} color="#EF4444" />
+              <Text className="text-red-500 mt-2 text-center">{error}</Text>
+            </View>
+          ) : guardData ? (
+            <>
+              {user?.imageUrl ? (
+                <Image
+                  source={{ uri: user.imageUrl }}
+                  style={{ width: 96, height: 96, borderRadius: 48 }}
+                  className="mb-4"
+                />
+              ) : (
+                <View style={{ backgroundColor: '#5B94D333' }} className="w-24 h-24 rounded-full items-center justify-center mb-4">
+                  <Text style={{ color: '#5B94D3' }} className="text-3xl font-bold">
+                    {(user?.fullName || guardData.name).split(' ').map(n => n[0]).join('')}
+                  </Text>
+                </View>
+              )}
 
-          <Text className="text-xl font-bold text-gray-900">{user?.fullName || mockCarGuard.name}</Text>
-          <Text className="text-sm text-gray-500">{user?.primaryEmailAddress?.emailAddress || 'Guard ID: ' + mockCarGuard.id}</Text>
-          
-          <View className="flex-row items-center mt-2">
-            <View className="flex-row items-center px-3 py-1 bg-green-50 rounded-full">
-              <View className="w-2 h-2 bg-green-500 rounded-full mr-2" />
-              <Text className="text-xs text-green-700">Active</Text>
-            </View>
-            <View className="flex-row items-center ml-2 px-3 py-1 bg-yellow-50 rounded-full">
-              <Ionicons name="star" size={12} color="#F59E0B" />
-              <Text className="text-xs text-yellow-700 ml-1">{mockCarGuard.rating}</Text>
-            </View>
-          </View>
+              <Text className="text-xl font-bold text-gray-900">{user?.fullName || guardData.name}</Text>
+              <Text className="text-sm text-gray-500">{user?.primaryEmailAddress?.emailAddress || 'Guard ID: ' + guardData.id}</Text>
 
-          <View className="flex-row justify-around w-full mt-6 pt-6 border-t border-gray-100">
-            <View className="items-center">
-              <Text className="text-2xl font-bold text-gray-900">
-                {formatCurrency(mockCarGuard.totalEarnings)}
-              </Text>
-              <Text className="text-xs text-gray-500">Total Earnings</Text>
-            </View>
-            <View className="items-center">
-              <Text style={{ color: '#5B94D3' }} className="text-2xl font-bold">
-                {formatCurrency(mockCarGuard.balance)}
-              </Text>
-              <Text className="text-xs text-gray-500">Available</Text>
-            </View>
-          </View>
+              <View className="flex-row items-center mt-2">
+                <View className="flex-row items-center px-3 py-1 bg-green-50 rounded-full">
+                  <View className="w-2 h-2 bg-green-500 rounded-full mr-2" />
+                  <Text className="text-xs text-green-700">Active</Text>
+                </View>
+                <View className="flex-row items-center ml-2 px-3 py-1 bg-yellow-50 rounded-full">
+                  <Ionicons name="star" size={12} color="#F59E0B" />
+                  <Text className="text-xs text-yellow-700 ml-1">{guardData.rating}</Text>
+                </View>
+              </View>
+
+              <View className="flex-row justify-around w-full mt-6 pt-6 border-t border-gray-100">
+                <View className="items-center">
+                  <Text className="text-2xl font-bold text-gray-900">
+                    {formatCurrency(guardData.totalEarnings)}
+                  </Text>
+                  <Text className="text-xs text-gray-500">Total Earnings</Text>
+                </View>
+                <View className="items-center">
+                  <Text style={{ color: '#5B94D3' }} className="text-2xl font-bold">
+                    {formatCurrency(guardData.balance)}
+                  </Text>
+                  <Text className="text-xs text-gray-500">Available</Text>
+                </View>
+              </View>
+            </>
+          ) : null}
         </View>
 
         {/* Personal Information */}
@@ -166,7 +229,7 @@ export default function ProfileScreen() {
 
           <View>
             <Text className="text-sm text-gray-500 mb-1">Work Location</Text>
-            <Text className="px-3 py-2 text-gray-900">{mockCarGuard.location}</Text>
+            <Text className="px-3 py-2 text-gray-900">{guardData?.location || 'Not assigned'}</Text>
           </View>
         </View>
 

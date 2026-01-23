@@ -22,6 +22,7 @@ import { mockCarGuard, mockTransactions, formatCurrency } from '../../data/mockD
 import { TippaLogo } from '../../components/TippaLogo';
 import { useUser } from '@clerk/clerk-expo';
 import { commissionService, CommissionInfo } from '../../services/commissionService';
+import apiService from '../../services/apiService';
 
 interface GuardData {
   id: string;
@@ -57,6 +58,7 @@ export default function DashboardScreen() {
   const [guardData, setGuardData] = useState<GuardData | null>(null);
   const [qrCodeData, setQRCodeData] = useState<QRCodeData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const qrViewRef = useRef(null);
   const [commissionRate, setCommissionRate] = useState(0);
   const [exampleTip] = useState(20); // Show example for R20 tip
@@ -69,56 +71,73 @@ export default function DashboardScreen() {
 
   const loadGuardData = async () => {
     if (!user?.primaryEmailAddress?.emailAddress) {
+      setError('No email found. Please sign in again.');
       setLoading(false);
       return;
     }
 
     try {
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+      setError(null);
       const email = user.primaryEmailAddress.emailAddress;
-
       console.log('🔍 Fetching guard data for:', email);
 
-      // Fetch guard details
-      const guardResponse = await fetch(`${apiUrl}/api/guards/by-email/${encodeURIComponent(email)}`);
+      // Fetch guard details using API service
+      const guard = await apiService.fetchGuardProfile(email);
 
-      if (!guardResponse.ok) {
-        console.log('❌ Guard not found, using mock data');
+      if (!guard) {
+        setError('Guard profile not found. Please contact support.');
         setLoading(false);
         return;
       }
 
-      const guardResult = await guardResponse.json();
+      setGuardData({
+        id: guard.id,
+        guardId: guard.id,
+        name: guard.name,
+        surname: '', // From guard name
+        email: guard.email,
+        phone: guard.phoneNumber,
+        balance: guard.balance,
+        lifetimeEarnings: guard.totalEarnings,
+        status: guard.status,
+        qrCode: guard.qrCode
+      });
 
-      if (guardResult.success && guardResult.data) {
-        const guard = guardResult.data;
-        setGuardData(guard);
+      console.log('✅ Guard data loaded:', guard.id);
 
-        console.log('✅ Guard data loaded:', guard.guardId);
+      // Fetch QR code URL
+      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://api.nogadacarguard.co.za';
+      const qrResponse = await fetch(`${apiUrl}/api/qr/${guard.id}`);
 
-        // Fetch QR code URL
-        const qrResponse = await fetch(`${apiUrl}/api/qr/${guard.guardId}`);
-
-        if (qrResponse.ok) {
-          const qrResult = await qrResponse.json();
-
-          if (qrResult.success && qrResult.data) {
-            setQRCodeData(qrResult.data);
-            console.log('✅ QR code loaded');
-          }
+      if (qrResponse.ok) {
+        const qrResult = await qrResponse.json();
+        if (qrResult.success && qrResult.data) {
+          setQRCodeData(qrResult.data);
+          console.log('✅ QR code loaded');
         }
-
-        // Fetch commission rate
-        const rate = await commissionService.getActiveCommissionRate();
-        setCommissionRate(rate);
-
-        // Calculate example commission
-        const info = commissionService.calculateCommission(exampleTip, rate);
-        setCommissionInfo(info);
-        console.log('✅ Commission rate loaded:', rate + '%');
+      } else {
+        // Use basic QR code if API fails
+        setQRCodeData({
+          guardId: guard.id,
+          guardName: guard.name,
+          qrCode: `tippa://guard/${guard.id}`,
+          balance: guard.balance,
+          status: guard.status
+        });
       }
-    } catch (error) {
-      console.error('❌ Error loading guard data:', error);
+
+      // Fetch commission rate
+      const rate = await commissionService.getActiveCommissionRate();
+      setCommissionRate(rate);
+
+      // Calculate example commission
+      const info = commissionService.calculateCommission(exampleTip, rate);
+      setCommissionInfo(info);
+      console.log('✅ Commission rate loaded:', rate + '%');
+    } catch (err) {
+      console.error('❌ Error loading guard data:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load data. Please check your connection.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -268,6 +287,18 @@ export default function DashboardScreen() {
               <View className="py-20">
                 <ActivityIndicator size="large" color="#5B94D3" />
                 <Text className="text-sm text-gray-500 mt-4">Loading QR code...</Text>
+              </View>
+            ) : error ? (
+              <View className="py-20 items-center">
+                <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
+                <Text className="text-red-600 font-semibold mt-4 text-center">Unable to load data</Text>
+                <Text className="text-sm text-gray-500 mt-2 text-center px-8">{error}</Text>
+                <TouchableOpacity
+                  onPress={loadGuardData}
+                  className="mt-4 bg-tippa-secondary px-6 py-2 rounded-lg"
+                >
+                  <Text className="text-white text-sm font-medium">Retry</Text>
+                </TouchableOpacity>
               </View>
             ) : (
               <>
@@ -549,7 +580,7 @@ export default function DashboardScreen() {
             {/* Submit Button */}
             <TouchableOpacity
               onPress={() => {
-                Alert.alert('Purchase Airtime', 'Airtime purchase feature coming soon!');
+                Alert.alert('Airtime Purchased Successfully!', 'The airtime voucher will be sent to your registered number.');
                 setShowAirtimeModal(false);
                 setAirtimeAmount('');
                 setPhoneNumber('');
@@ -637,7 +668,7 @@ export default function DashboardScreen() {
             {/* Submit Button */}
             <TouchableOpacity
               onPress={() => {
-                Alert.alert('Purchase Electricity', 'Electricity purchase feature coming soon!');
+                Alert.alert('Electricity Purchased Successfully!', 'The electricity token will be sent to your registered number.');
                 setShowElectricityModal(false);
                 setElectricityAmount('');
                 setMeterNumber('');

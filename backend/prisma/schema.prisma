@@ -549,8 +549,19 @@ model Payout {
   id                String           @id @default(auto()) @map("_id") @db.ObjectId
   guardId           String           @db.ObjectId
   amount            Float
-  status            String
+  type              String           @default("bank_transfer")
+  status            String           @default("pending")
+  voucherNumber     String?          @unique
+  requestDate       DateTime         @default(now())
+  processDate       DateTime?
+  reference         String?
+  bankName          String?
+  accountNumber     String?
+  meterNumber        String?
+  phoneNumber        String?
+  provider          String?
   createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   guard             CarGuard         @relation(fields: [guardId], references: [id])
 }
@@ -560,7 +571,13 @@ model Transaction {
   guardId           String           @db.ObjectId
   type              String
   amount            Float
+  status            String           @default("completed")
+  description       String?
+  reference         String?
+  balance           Float?
+  metadata          Json?
   createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   guard             CarGuard         @relation(fields: [guardId], references: [id])
 }

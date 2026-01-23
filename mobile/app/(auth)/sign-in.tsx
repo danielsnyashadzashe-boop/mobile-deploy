@@ -91,38 +91,10 @@ export default function SignInScreen() {
 
       console.log('Sign in status:', completeSignIn.status);
 
-      // If sign-in is complete, activate session
+      // If sign-in is complete, activate session and go to app
       if (completeSignIn.status === 'complete') {
         await setActive({ session: completeSignIn.createdSessionId });
-
-        // Check registration status
-        const userId = completeSignIn.createdUserId;
-        if (userId) {
-          const registrationStatus = await checkRegistrationStatus(userId);
-
-          // Route based on registration status
-          if (!registrationStatus.hasCompletedRegistration) {
-            router.replace('/(auth)/complete-registration');
-            return;
-          }
-
-          if (registrationStatus.currentStatus === 'pending_approval') {
-            router.replace('/(auth)/registration-pending');
-            return;
-          }
-
-          if (registrationStatus.canAccessApp) {
-            // User can access app (APPROVED or has active CarGuard)
-            router.replace('/(tabs)');
-            return;
-          }
-
-          // Fallback to complete registration
-          router.replace('/(auth)/complete-registration');
-          return;
-        }
-
-        // If no userId, just go to tabs
+        // SIMPLIFIED: Go directly to app, skip registration flow
         router.replace('/(tabs)');
         return;
       }
@@ -222,15 +194,14 @@ export default function SignInScreen() {
             )}
           </TouchableOpacity>
 
-          {/* SIGN UP LINK COMMENTED OUT - Guards are added via admin/backend only */}
-          {/* <View style={styles.footer}>
+          <View style={styles.footer}>
             <Text style={styles.footerText}>Don't have an account? </Text>
             <Link href="/(auth)/sign-up" asChild>
               <TouchableOpacity disabled={loading}>
                 <Text style={styles.linkText}>Sign Up</Text>
               </TouchableOpacity>
             </Link>
-          </View> */}
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
