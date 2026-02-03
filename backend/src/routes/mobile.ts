@@ -4,222 +4,302 @@ import prisma from '../lib/prisma'
 const router = Router()
 
 /**
- * Generate a unique 6-digit linking code
+ * Normalize South African phone numbers
+ * Converts various formats to +27XXXXXXXXX
  */
-const generateLinkingCode = async (): Promise<string> => {
-  let code: string
-  let isUnique = false
+function normalizePhone(phone: string | null | undefined): string | null {
+  if (!phone) return null
 
-  while (!isUnique) {
-    code = Math.floor(100000 + Math.random() * 900000).toString()
-    const existing = await prisma.carGuard.findFirst({
-      where: { linkingCode: code }
-    })
-    isUnique = !existing
+  // Remove all non-digit characters except +
+  let cleaned = phone.replace(/[^\d+]/g, '')
+
+  // Handle South African numbers
+  if (cleaned.startsWith('0')) {
+    cleaned = '+27' + cleaned.substring(1)
+  } else if (cleaned.startsWith('27') && !cleaned.startsWith('+')) {
+    cleaned = '+' + cleaned
+  } else if (!cleaned.startsWith('+')) {
+    // Assume it's a local number without country code
+    cleaned = '+27' + cleaned
   }
 
-  return code!
+  return cleaned
 }
 
 /**
- * POST /api/mobile/link-account
- * Link Clerk user to guard profile using 6-digit code
+ * POST /api/guards/verify-access-code
+ * Step 1: Verify the 6-digit access code is valid and not expired
  */
-router.post('/link-account', async (req: Request, res: Response) => {
+router.post('/guards/verify-access-code', async (req: Request, res: Response) => {
   try {
-    const { linkingCode, clerkUserId, clerkEmail } = req.body
+    const { accessCode } = req.body
 
-    console.log('🔗 Linking account request:', { linkingCode, clerkUserId, clerkEmail })
-
-    if (!linkingCode || linkingCode.length !== 6) {
+    if (!accessCode || accessCode.length !== 6) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid linking code format. Must be 6 digits.'
+        error: 'Invalid access code format. Please enter a 6-digit code.'
       })
     }
 
-    if (!clerkUserId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Clerk user ID is required'
-      })
-    }
+    console.log('🔍 Verifying access code:', accessCode)
 
-    // Check if this Clerk user is already linked to a guard
-    const existingLink = await prisma.carGuard.findFirst({
-      where: { clerkUserId: clerkUserId },
-      include: {
-        location: {
-          select: { id: true, name: true, address: true }
-        }
-      }
-    })
-
-    if (existingLink) {
-      console.log('✅ User already linked to guard:', existingLink.guardId)
-      return res.json({
-        success: true,
-        alreadyLinked: true,
-        data: {
-          id: existingLink.id,
-          guardId: existingLink.guardId,
-          name: existingLink.name,
-          surname: existingLink.surname,
-          fullName: `${existingLink.name} ${existingLink.surname}`,
-          email: existingLink.clerkEmail,
-          phone: existingLink.phone,
-          balance: existingLink.balance || 0,
-          totalEarnings: existingLink.lifetimeEarnings || 0,
-          qrCodeUrl: existingLink.qrCodeUrl,
-          status: existingLink.status,
-          location: existingLink.location
-        }
-      })
-    }
-
-    // Find guard by linking code
+    // Find guard with this access code
     const guard = await prisma.carGuard.findFirst({
-      where: {
-        linkingCode: linkingCode,
-        status: 'ACTIVE',
-        clerkUserId: null  // Not yet linked
-      },
+      where: { accessCode },
       include: {
-        location: {
-          select: { id: true, name: true, address: true }
+        location: true,
+        user: {
+          select: { email: true }
         }
       }
     })
 
     if (!guard) {
-      console.log('❌ Invalid linking code or already used:', linkingCode)
+      console.log('❌ Access code not found:', accessCode)
       return res.status(404).json({
         success: false,
-        error: 'Invalid linking code or code already used'
+        error: 'Invalid access code. Please check the code and try again.'
       })
     }
 
-    // Check if code has expired
-    if (guard.linkingCodeExpiry && new Date() > guard.linkingCodeExpiry) {
-      console.log('❌ Linking code expired:', linkingCode)
+    // Check if code is expired
+    if (guard.accessCodeExpiry && new Date() > guard.accessCodeExpiry) {
+      console.log('❌ Access code expired:', accessCode)
       return res.status(400).json({
         success: false,
-        error: 'Linking code has expired. Please contact your manager for a new code.'
+        error: 'Access code has expired. Please contact your manager for a new code.'
       })
     }
 
-    // Link the Clerk user to this guard
+    // Check if guard is active
+    if (guard.status !== 'ACTIVE' && guard.status !== 'PENDING') {
+      console.log('❌ Guard not active:', guard.guardId, guard.status)
+      return res.status(400).json({
+        success: false,
+        error: 'This guard account is not active. Please contact your manager.'
+      })
+    }
+
+    // Check if already linked
+    if (guard.clerkUserId) {
+      console.log('❌ Guard already linked:', guard.guardId)
+      return res.status(400).json({
+        success: false,
+        error: 'This guard account is already linked to a mobile account.'
+      })
+    }
+
+    console.log('✅ Access code valid for guard:', guard.guardId)
+
+    return res.json({
+      success: true,
+      data: {
+        guardId: guard.guardId,
+        id: guard.id,
+        name: guard.name,
+        surname: guard.surname,
+        phone: guard.phone,
+        email: guard.user?.email || null,
+        location: guard.location ? {
+          id: guard.location.id,
+          name: guard.location.name,
+          address: guard.location.address
+        } : null,
+        status: guard.status
+      }
+    })
+  } catch (error) {
+    console.error('❌ Error verifying access code:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'Something went wrong. Please try again.'
+    })
+  }
+})
+
+/**
+ * POST /api/guards/link-mobile-account
+ * Step 2: Link Clerk user to guard profile after email/phone verification
+ */
+router.post('/guards/link-mobile-account', async (req: Request, res: Response) => {
+  try {
+    const { accessCode, clerkUserId, clerkEmail, clerkPhone } = req.body
+
+    if (!accessCode || !clerkUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields'
+      })
+    }
+
+    console.log('🔗 Linking mobile account:', { accessCode, clerkUserId })
+
+    // Find guard with this access code
+    const guard = await prisma.carGuard.findFirst({
+      where: { accessCode },
+      include: {
+        location: true,
+        user: {
+          select: { email: true }
+        }
+      }
+    })
+
+    if (!guard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invalid access code'
+      })
+    }
+
+    // Check if code is expired
+    if (guard.accessCodeExpiry && new Date() > guard.accessCodeExpiry) {
+      return res.status(400).json({
+        success: false,
+        error: 'Access code has expired'
+      })
+    }
+
+    // Check if already linked
+    if (guard.clerkUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'This account is already linked'
+      })
+    }
+
+    // Verify email or phone matches
+    const guardEmail = guard.user?.email?.toLowerCase()
+    const guardPhone = normalizePhone(guard.phone)
+    const normalizedClerkEmail = clerkEmail?.toLowerCase()
+    const normalizedClerkPhone = normalizePhone(clerkPhone)
+
+    const emailMatches = guardEmail && normalizedClerkEmail && guardEmail === normalizedClerkEmail
+    const phoneMatches = guardPhone && normalizedClerkPhone && guardPhone === normalizedClerkPhone
+
+    if (!emailMatches && !phoneMatches) {
+      console.log('❌ Email/phone mismatch:', {
+        guardEmail,
+        clerkEmail: normalizedClerkEmail,
+        guardPhone,
+        clerkPhone: normalizedClerkPhone
+      })
+      return res.status(400).json({
+        success: false,
+        error: 'The email or phone number you signed up with does not match the guard profile. Please use the same email or phone your manager registered you with.'
+      })
+    }
+
+    // Link the account
     const updatedGuard = await prisma.carGuard.update({
       where: { id: guard.id },
       data: {
-        clerkUserId: clerkUserId,
-        clerkEmail: clerkEmail,
-        linkedAt: new Date(),
-        // Clear the linking code after successful link
-        linkingCode: null,
-        linkingCodeExpiry: null
+        clerkUserId,
+        accessCode: null, // Clear the access code after linking
+        accessCodeExpiry: null,
+        status: 'ACTIVE'
       },
       include: {
-        location: {
-          select: { id: true, name: true, address: true }
+        location: true,
+        user: {
+          select: { email: true }
         }
       }
     })
 
     console.log('✅ Account linked successfully:', updatedGuard.guardId)
 
-    res.json({
+    return res.json({
       success: true,
       data: {
-        id: updatedGuard.id,
         guardId: updatedGuard.guardId,
+        id: updatedGuard.id,
         name: updatedGuard.name,
         surname: updatedGuard.surname,
-        fullName: `${updatedGuard.name} ${updatedGuard.surname}`,
-        email: clerkEmail,
         phone: updatedGuard.phone,
+        email: updatedGuard.user?.email || null,
         balance: updatedGuard.balance || 0,
-        totalEarnings: updatedGuard.lifetimeEarnings || 0,
+        lifetimeEarnings: updatedGuard.lifetimeEarnings || 0,
+        qrCode: updatedGuard.qrCode,
         qrCodeUrl: updatedGuard.qrCodeUrl,
+        accessCode: null,
+        accessCodeExpiry: null,
+        location: updatedGuard.location ? {
+          id: updatedGuard.location.id,
+          name: updatedGuard.location.name,
+          address: updatedGuard.location.address
+        } : null,
         status: updatedGuard.status,
-        location: updatedGuard.location
+        rating: updatedGuard.rating || 0,
+        totalRatings: updatedGuard.totalRatings || 0,
+        profileImage: updatedGuard.profileImage
       }
     })
   } catch (error) {
     console.error('❌ Error linking account:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: 'Failed to link account'
+      error: 'Something went wrong. Please try again.'
     })
   }
 })
 
 /**
  * GET /api/mobile/check-link/:clerkUserId
- * Check if Clerk user is already linked to a guard
+ * Check if a Clerk user is already linked to a guard profile
  */
-router.get('/check-link/:clerkUserId', async (req: Request, res: Response) => {
+router.get('/mobile/check-link/:clerkUserId', async (req: Request, res: Response) => {
   try {
     const { clerkUserId } = req.params
 
     console.log('🔍 Checking link for Clerk user:', clerkUserId)
 
     const guard = await prisma.carGuard.findFirst({
-      where: { clerkUserId: clerkUserId },
-      select: {
-        id: true,
-        guardId: true,
-        name: true,
-        surname: true,
-        phone: true,
-        balance: true,
-        lifetimeEarnings: true,
-        status: true,
-        qrCodeUrl: true,
-        clerkEmail: true,
-        location: {
-          select: {
-            id: true,
-            name: true,
-            address: true
-          }
+      where: { clerkUserId },
+      include: {
+        location: true,
+        user: {
+          select: { email: true }
         }
       }
     })
 
     if (!guard) {
-      console.log('ℹ️ No guard linked to Clerk user:', clerkUserId)
       return res.json({
         success: true,
-        isLinked: false
+        data: { isLinked: false }
       })
     }
 
     console.log('✅ Found linked guard:', guard.guardId)
 
-    res.json({
+    return res.json({
       success: true,
-      isLinked: true,
       data: {
+        isLinked: true,
         id: guard.id,
         guardId: guard.guardId,
         name: guard.name,
         surname: guard.surname,
-        fullName: `${guard.name} ${guard.surname}`,
-        email: guard.clerkEmail,
         phone: guard.phone,
+        email: guard.user?.email || null,
         balance: guard.balance || 0,
-        totalEarnings: guard.lifetimeEarnings || 0,
-        status: guard.status,
+        lifetimeEarnings: guard.lifetimeEarnings || 0,
         qrCodeUrl: guard.qrCodeUrl,
-        location: guard.location
+        status: guard.status,
+        rating: guard.rating || 0,
+        location: guard.location ? {
+          id: guard.location.id,
+          name: guard.location.name,
+          address: guard.location.address
+        } : null
       }
     })
   } catch (error) {
     console.error('❌ Error checking link:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: 'Failed to check account link'
+      error: 'Failed to check link status'
     })
   }
 })
@@ -228,22 +308,16 @@ router.get('/check-link/:clerkUserId', async (req: Request, res: Response) => {
  * GET /api/mobile/guard/:clerkUserId
  * Get guard profile by Clerk user ID
  */
-router.get('/guard/:clerkUserId', async (req: Request, res: Response) => {
+router.get('/mobile/guard/:clerkUserId', async (req: Request, res: Response) => {
   try {
     const { clerkUserId } = req.params
 
-    console.log('🔍 Fetching guard for Clerk user:', clerkUserId)
-
     const guard = await prisma.carGuard.findFirst({
-      where: { clerkUserId: clerkUserId },
+      where: { clerkUserId },
       include: {
-        location: {
-          select: {
-            id: true,
-            name: true,
-            address: true,
-            city: true
-          }
+        location: true,
+        user: {
+          select: { email: true }
         }
       }
     })
@@ -255,32 +329,32 @@ router.get('/guard/:clerkUserId', async (req: Request, res: Response) => {
       })
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         id: guard.id,
         guardId: guard.guardId,
         name: guard.name,
         surname: guard.surname,
-        fullName: `${guard.name} ${guard.surname}`,
-        email: guard.clerkEmail,
         phone: guard.phone,
+        email: guard.user?.email || null,
         balance: guard.balance || 0,
-        totalEarnings: guard.lifetimeEarnings || 0,
+        lifetimeEarnings: guard.lifetimeEarnings || 0,
+        qrCodeUrl: guard.qrCodeUrl,
         status: guard.status,
         rating: guard.rating || 0,
-        qrCodeUrl: guard.qrCodeUrl,
-        bankName: guard.bankName,
-        accountNumber: guard.accountNumber,
-        createdAt: guard.createdAt,
-        location: guard.location
+        location: guard.location ? {
+          id: guard.location.id,
+          name: guard.location.name,
+          address: guard.location.address
+        } : null
       }
     })
   } catch (error) {
     console.error('❌ Error fetching guard:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: 'Failed to fetch guard details'
+      error: 'Failed to fetch guard profile'
     })
   }
 })
@@ -289,14 +363,14 @@ router.get('/guard/:clerkUserId', async (req: Request, res: Response) => {
  * GET /api/mobile/guard/:clerkUserId/transactions
  * Get transactions for a guard by Clerk user ID
  */
-router.get('/guard/:clerkUserId/transactions', async (req: Request, res: Response) => {
+router.get('/mobile/guard/:clerkUserId/transactions', async (req: Request, res: Response) => {
   try {
     const { clerkUserId } = req.params
-    const { limit = '20', offset = '0', type } = req.query
+    const { limit = '50', offset = '0', type } = req.query
 
     const guard = await prisma.carGuard.findFirst({
-      where: { clerkUserId: clerkUserId },
-      select: { id: true, guardId: true }
+      where: { clerkUserId },
+      select: { id: true }
     })
 
     if (!guard) {
@@ -306,52 +380,45 @@ router.get('/guard/:clerkUserId/transactions', async (req: Request, res: Respons
       })
     }
 
-    const whereClause: any = {
-      guardId: guard.id
-    }
-
+    const where: any = { guardId: guard.id }
     if (type && type !== 'all') {
-      whereClause.type = (type as string).toUpperCase()
+      where.type = type
     }
 
-    const transactions = await prisma.transaction.findMany({
-      where: whereClause,
-      orderBy: { createdAt: 'desc' },
-      take: parseInt(limit as string),
-      skip: parseInt(offset as string),
-      select: {
-        id: true,
-        type: true,
-        amount: true,
-        description: true,
-        status: true,
-        reference: true,
-        balance: true,
-        createdAt: true
-      }
-    })
+    const [transactions, total] = await Promise.all([
+      prisma.transaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: parseInt(limit as string),
+        skip: parseInt(offset as string)
+      }),
+      prisma.transaction.count({ where })
+    ])
 
-    const total = await prisma.transaction.count({ where: whereClause })
-
-    res.json({
+    return res.json({
       success: true,
       data: {
         transactions: transactions.map(t => ({
-          ...t,
+          id: t.id,
+          type: t.type,
+          amount: t.amount,
+          description: null,
+          status: 'COMPLETED',
+          reference: null,
+          balance: null,
           date: t.createdAt.toISOString().split('T')[0],
-          time: t.createdAt.toISOString().split('T')[1].split('.')[0]
+          time: t.createdAt.toISOString().split('T')[1].split('.')[0],
+          createdAt: t.createdAt.toISOString()
         })),
         pagination: {
           total,
-          limit: parseInt(limit as string),
-          offset: parseInt(offset as string),
           hasMore: parseInt(offset as string) + transactions.length < total
         }
       }
     })
   } catch (error) {
     console.error('❌ Error fetching transactions:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to fetch transactions'
     })
@@ -362,13 +429,13 @@ router.get('/guard/:clerkUserId/transactions', async (req: Request, res: Respons
  * GET /api/mobile/guard/:clerkUserId/payouts
  * Get payouts for a guard by Clerk user ID
  */
-router.get('/guard/:clerkUserId/payouts', async (req: Request, res: Response) => {
+router.get('/mobile/guard/:clerkUserId/payouts', async (req: Request, res: Response) => {
   try {
     const { clerkUserId } = req.params
 
     const guard = await prisma.carGuard.findFirst({
-      where: { clerkUserId: clerkUserId },
-      select: { id: true, guardId: true }
+      where: { clerkUserId },
+      select: { id: true }
     })
 
     if (!guard) {
@@ -380,31 +447,30 @@ router.get('/guard/:clerkUserId/payouts', async (req: Request, res: Response) =>
 
     const payouts = await prisma.payout.findMany({
       where: { guardId: guard.id },
-      orderBy: { createdAt: 'desc' },
-      take: 50
+      orderBy: { createdAt: 'desc' }
     })
 
-    res.json({
+    return res.json({
       success: true,
       data: payouts.map(p => ({
         id: p.id,
-        voucherNumber: p.voucherNumber,
+        voucherNumber: null,
         amount: p.amount,
-        type: p.type,
+        type: 'BANK_TRANSFER',
         status: p.status,
-        requestDate: p.requestDate,
-        processDate: p.processDate,
-        reference: p.reference,
-        bankName: p.bankName,
-        accountNumber: p.accountNumber,
-        meterNumber: p.meterNumber,
-        phoneNumber: p.phoneNumber,
-        provider: p.provider
+        requestDate: p.createdAt.toISOString(),
+        processDate: null,
+        reference: null,
+        bankName: null,
+        accountNumber: null,
+        meterNumber: null,
+        phoneNumber: null,
+        provider: null
       }))
     })
   } catch (error) {
     console.error('❌ Error fetching payouts:', error)
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to fetch payouts'
     })
@@ -415,142 +481,80 @@ router.get('/guard/:clerkUserId/payouts', async (req: Request, res: Response) =>
  * POST /api/mobile/guard/:clerkUserId/update-activity
  * Update guard's last active timestamp
  */
-router.post('/guard/:clerkUserId/update-activity', async (req: Request, res: Response) => {
+router.post('/mobile/guard/:clerkUserId/update-activity', async (req: Request, res: Response) => {
   try {
     const { clerkUserId } = req.params
 
     await prisma.carGuard.updateMany({
-      where: { clerkUserId: clerkUserId },
+      where: { clerkUserId },
       data: { lastActiveAt: new Date() }
     })
 
-    res.json({
-      success: true,
-      message: 'Activity updated'
-    })
+    return res.json({ success: true })
   } catch (error) {
-    console.error('❌ Error updating activity:', error)
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update activity'
-    })
+    // Silently fail - not critical
+    return res.json({ success: true })
   }
 })
 
 /**
- * POST /api/mobile/admin/guards/:guardId/regenerate-linking-code
- * Admin endpoint to regenerate linking code for a guard
+ * POST /api/admin/guards/:guardId/generate-access-code
+ * Generate a new 6-digit access code for a guard (admin endpoint)
  */
-router.post('/admin/guards/:guardId/regenerate-linking-code', async (req: Request, res: Response) => {
+router.post('/admin/guards/:guardId/generate-access-code', async (req: Request, res: Response) => {
   try {
     const { guardId } = req.params
+    const { expiryHours = 24 } = req.body
 
-    console.log('🔄 Regenerating linking code for guard:', guardId)
+    // Generate unique 6-digit code (retry if already exists)
+    let accessCode: string
+    let attempts = 0
+    const maxAttempts = 10
 
-    const guard = await prisma.carGuard.findFirst({
-      where: { guardId: guardId }
-    })
+    do {
+      accessCode = Math.floor(100000 + Math.random() * 900000).toString()
+      const existing = await prisma.carGuard.findFirst({
+        where: { accessCode }
+      })
+      if (!existing) break
+      attempts++
+    } while (attempts < maxAttempts)
 
-    if (!guard) {
-      return res.status(404).json({
+    if (attempts >= maxAttempts) {
+      return res.status(500).json({
         success: false,
-        error: 'Guard not found'
+        error: 'Failed to generate unique access code'
       })
     }
 
-    // Generate new linking code with 30-day expiry
-    const linkingCode = await generateLinkingCode()
-    const linkingCodeExpiry = new Date()
-    linkingCodeExpiry.setDate(linkingCodeExpiry.getDate() + 30)
+    const accessCodeExpiry = new Date(Date.now() + expiryHours * 60 * 60 * 1000)
 
-    const updatedGuard = await prisma.carGuard.update({
-      where: { id: guard.id },
+    const guard = await prisma.carGuard.update({
+      where: { guardId },
       data: {
-        linkingCode,
-        linkingCodeExpiry,
-        // Clear any existing Clerk link
-        clerkUserId: null,
-        clerkEmail: null,
-        linkedAt: null
+        accessCode,
+        accessCodeExpiry,
+        clerkUserId: null // Clear any existing link
       }
     })
 
-    console.log('✅ New linking code generated:', linkingCode)
+    console.log('✅ Generated access code for guard:', guardId, accessCode)
 
-    res.json({
+    return res.json({
       success: true,
       data: {
-        guardId: updatedGuard.guardId,
-        linkingCode: updatedGuard.linkingCode,
-        linkingCodeExpiry: updatedGuard.linkingCodeExpiry
+        guardId: guard.guardId,
+        accessCode,
+        expiresAt: accessCodeExpiry.toISOString()
       }
     })
   } catch (error) {
-    console.error('❌ Error regenerating linking code:', error)
-    res.status(500).json({
+    console.error('❌ Error generating access code:', error)
+    return res.status(500).json({
       success: false,
-      error: 'Failed to regenerate linking code'
+      error: 'Failed to generate access code'
     })
   }
 })
 
-/**
- * POST /api/mobile/admin/guards/:guardId/unlink-mobile
- * Admin endpoint to unlink a guard's mobile app
- */
-router.post('/admin/guards/:guardId/unlink-mobile', async (req: Request, res: Response) => {
-  try {
-    const { guardId } = req.params
-
-    console.log('🔓 Unlinking mobile app for guard:', guardId)
-
-    const guard = await prisma.carGuard.findFirst({
-      where: { guardId: guardId }
-    })
-
-    if (!guard) {
-      return res.status(404).json({
-        success: false,
-        error: 'Guard not found'
-      })
-    }
-
-    // Generate new linking code for re-linking
-    const linkingCode = await generateLinkingCode()
-    const linkingCodeExpiry = new Date()
-    linkingCodeExpiry.setDate(linkingCodeExpiry.getDate() + 30)
-
-    const updatedGuard = await prisma.carGuard.update({
-      where: { id: guard.id },
-      data: {
-        clerkUserId: null,
-        clerkEmail: null,
-        linkedAt: null,
-        linkingCode,
-        linkingCodeExpiry
-      }
-    })
-
-    console.log('✅ Mobile app unlinked, new code:', linkingCode)
-
-    res.json({
-      success: true,
-      message: 'Mobile app unlinked successfully',
-      data: {
-        guardId: updatedGuard.guardId,
-        linkingCode: updatedGuard.linkingCode,
-        linkingCodeExpiry: updatedGuard.linkingCodeExpiry
-      }
-    })
-  } catch (error) {
-    console.error('❌ Error unlinking mobile:', error)
-    res.status(500).json({
-      success: false,
-      error: 'Failed to unlink mobile app'
-    })
-  }
-})
-
-// Export the generateLinkingCode function for use in other routes
-export { generateLinkingCode }
 export default router

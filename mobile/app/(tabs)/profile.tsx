@@ -205,7 +205,7 @@ export default function ProfileScreen() {
 
           <View>
             <Text className="text-sm text-gray-500 mb-1">Work Location</Text>
-            <Text className="px-3 py-2 text-gray-900">{guardData?.location || 'Not assigned'}</Text>
+            <Text className="px-3 py-2 text-gray-900">{guardData?.location?.name || 'Not assigned'}</Text>
           </View>
         </View>
 
