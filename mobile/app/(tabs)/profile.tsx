@@ -15,16 +15,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { formatCurrency } from '../../data/mockData';
-import apiService from '../../services/apiService';
-import { CarGuard } from '../../types';
+import { useGuard } from '../../contexts/GuardContext';
 
 export default function ProfileScreen() {
   const { signOut } = useAuth();
   const { user } = useUser();
+  const { guardData, clearGuardData, isLoading: guardLoading } = useGuard();
   const [isEditing, setIsEditing] = useState(false);
   const [notifications, setNotifications] = useState(true);
-  const [guardData, setGuardData] = useState<CarGuard | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profileData, setProfileData] = useState({
     name: user?.fullName || '',
@@ -36,47 +35,23 @@ export default function ProfileScreen() {
     branchCode: '',
   });
 
-  // Load guard data from API
+  // Update profile data when guard data is available from context
   useEffect(() => {
-    loadGuardData();
-  }, []);
-
-  const loadGuardData = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const email = user?.primaryEmailAddress?.emailAddress;
-      if (!email) {
-        setError('No email found. Please log in again.');
-        setLoading(false);
-        return;
-      }
-
-      const guard = await apiService.fetchGuardProfile(email);
-      if (!guard) {
-        setError('Guard profile not found. Please contact support.');
-        setLoading(false);
-        return;
-      }
-
-      setGuardData(guard);
+    if (guardData && !guardLoading) {
       setProfileData({
-        name: guard.name,
-        phoneNumber: guard.phoneNumber,
-        email: guard.email,
-        bankName: guard.bankDetails?.bankName || '',
-        accountNumber: guard.bankDetails?.accountNumber || '',
-        accountType: guard.bankDetails?.accountType || '',
-        branchCode: guard.bankDetails?.branchCode || '',
+        name: guardData.fullName || '',
+        phoneNumber: guardData.phone || '',
+        email: guardData.email || '',
+        bankName: '',
+        accountNumber: '',
+        accountType: '',
+        branchCode: '',
       });
-    } catch (err) {
-      setError('Failed to load profile. Please check your connection.');
-      console.error('Error loading profile:', err);
-    } finally {
-      setLoading(false);
+      setError(null);
+    } else if (!guardLoading && !guardData) {
+      setError('Guard profile not found. Please link your account.');
     }
-  };
+  }, [guardData, guardLoading]);
 
   const handleSave = async () => {
     // In a real implementation, you would call the API to update the profile
@@ -96,6 +71,7 @@ export default function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
+              await clearGuardData(); // Clear guard data from context and storage
               await signOut();
               router.replace('/(auth)/sign-in');
             } catch (error) {

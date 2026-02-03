@@ -85,6 +85,13 @@ model CarGuard {
   qrCodeUrl         String?
   nfcTag            String?          @unique
 
+  // Mobile App Linking Fields
+  linkingCode       String?                   // 6-digit code for mobile app linking (uniqueness enforced in code)
+  linkingCodeExpiry DateTime?                 // Expiry date for linking code (30 days)
+  clerkUserId       String?                   // Clerk user ID once linked (uniqueness enforced in code)
+  clerkEmail        String?                   // Email from Clerk
+  linkedAt          DateTime?                 // When account was linked
+
   bankName          String?
   accountNumber     String?
   accountHolder     String?

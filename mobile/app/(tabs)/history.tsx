@@ -16,20 +16,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '@clerk/clerk-expo';
 import { mockTransactions, formatCurrency, formatDate } from '../../data/mockData';
-import apiService from '../../services/apiService';
-import { Transaction } from '../../types';
-
-interface GuardData {
-  guardId: string;
-  name: string;
-}
+import { useGuard } from '../../contexts/GuardContext';
+import { getTransactions, Transaction } from '../../services/mobileApiService';
 
 export default function HistoryScreen() {
   const { user } = useUser();
+  const { guardData, isLoading: guardLoading } = useGuard();
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [guardData, setGuardData] = useState<GuardData | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [selectedPeriod, setSelectedPeriod] = useState('All Time');
@@ -50,14 +45,19 @@ export default function HistoryScreen() {
     'All Time'
   ];
 
-  // Load guard data and transactions
+  // Load transactions when guard data is available
   useEffect(() => {
-    loadData();
-  }, [user]);
+    if (guardData && !guardLoading && user?.id) {
+      loadData();
+    } else if (!guardLoading && !guardData) {
+      setError('Guard profile not found. Please link your account.');
+      setLoading(false);
+    }
+  }, [guardData, guardLoading, user]);
 
   const loadData = async () => {
-    if (!user?.primaryEmailAddress?.emailAddress) {
-      setError('No email found. Please sign in again.');
+    if (!user?.id) {
+      setError('Not authenticated. Please sign in again.');
       setLoading(false);
       return;
     }
@@ -66,22 +66,17 @@ export default function HistoryScreen() {
       setError(null);
       setLoading(true);
 
-      // First fetch guard profile to get guardId
-      const guard = await apiService.fetchGuardProfile(user.primaryEmailAddress.emailAddress);
+      // Fetch transactions from admin API using clerkUserId
+      const response = await getTransactions(user.id, { limit: 100 });
 
-      if (!guard) {
-        setError('Guard profile not found. Please contact support.');
+      if (!response.success) {
+        setError(response.error || 'Failed to load transactions');
         setLoading(false);
         return;
       }
 
-      setGuardData({ guardId: guard.id, name: guard.name });
-
-      // Then fetch transactions
-      const txs = await apiService.fetchTransactions(guard.id);
-      setTransactions(txs);
-
-      console.log(`✅ Loaded ${txs.length} transactions`);
+      setTransactions(response.data?.transactions || []);
+      console.log(`✅ Loaded ${response.data?.transactions?.length || 0} transactions`);
     } catch (err) {
       console.error('❌ Error loading data:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to load data. Please check your connection.';

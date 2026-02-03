@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
+import { generateLinkingCode } from './mobile'
 
 const router = Router()
 
@@ -71,6 +72,11 @@ router.post('/registration/:id/approve', async (req: Request, res: Response) => 
     // Generate NFC tag
     const nfcTag = `NFC${Date.now()}${Math.random().toString(36).substring(2, 8).toUpperCase()}`
 
+    // Generate linking code for mobile app (valid for 30 days)
+    const linkingCode = await generateLinkingCode()
+    const linkingCodeExpiry = new Date()
+    linkingCodeExpiry.setDate(linkingCodeExpiry.getDate() + 30)
+
     // Create CarGuard record
     const guard = await prisma.carGuard.create({
       data: {
@@ -94,7 +100,10 @@ router.post('/registration/:id/approve', async (req: Request, res: Response) => 
         accountHolder: registration.accountHolder,
         branchCode: registration.branchCode,
         emergencyContact: registration.emergencyName,
-        emergencyPhone: registration.emergencyPhone
+        emergencyPhone: registration.emergencyPhone,
+        // Mobile app linking
+        linkingCode: linkingCode,
+        linkingCodeExpiry: linkingCodeExpiry
       }
     })
 
@@ -122,7 +131,9 @@ router.post('/registration/:id/approve', async (req: Request, res: Response) => 
           surname: guard.surname,
           email: user.email,
           status: guard.status,
-          qrCode: guard.qrCode
+          qrCode: guard.qrCode,
+          linkingCode: guard.linkingCode,
+          linkingCodeExpiry: guard.linkingCodeExpiry
         }
       }
     })

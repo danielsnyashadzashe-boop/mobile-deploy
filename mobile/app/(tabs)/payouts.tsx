@@ -19,20 +19,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '@clerk/clerk-expo';
 import { formatCurrency, formatDate } from '../../data/mockData';
-import apiService from '../../services/apiService';
-import { Payout } from '../../types';
-
-interface GuardData {
-  guardId: string;
-  balance: number;
-}
+import { useGuard } from '../../contexts/GuardContext';
+import { getPayouts, Payout } from '../../services/mobileApiService';
 
 export default function PayoutsScreen() {
   const { user } = useUser();
+  const { guardData, isLoading: guardLoading } = useGuard();
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [guardData, setGuardData] = useState<GuardData | null>(null);
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -54,39 +49,37 @@ export default function PayoutsScreen() {
   const payoutThreshold = 500.00;
   const nextPayoutDate = '2025-09-05';
 
-  // Load guard data and payouts from API
+  // Load payouts when guard data is available
   useEffect(() => {
-    loadData();
-  }, []);
+    if (guardData && !guardLoading && user?.id) {
+      loadData();
+    } else if (!guardLoading && !guardData) {
+      setError('Guard profile not found. Please link your account.');
+      setLoading(false);
+    }
+  }, [guardData, guardLoading, user]);
 
   const loadData = async () => {
+    if (!user?.id) {
+      setError('Not authenticated. Please sign in again.');
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      const email = user?.primaryEmailAddress?.emailAddress;
-      if (!email) {
-        setError('No email found. Please log in again.');
+      // Fetch payouts from admin API using clerkUserId
+      const response = await getPayouts(user.id);
+
+      if (!response.success) {
+        setError(response.error || 'Failed to load payouts');
         setLoading(false);
         return;
       }
 
-      // Fetch guard profile
-      const guard = await apiService.fetchGuardProfile(email);
-      if (!guard) {
-        setError('Guard profile not found. Please contact support.');
-        setLoading(false);
-        return;
-      }
-
-      setGuardData({
-        guardId: guard.id,
-        balance: guard.balance,
-      });
-
-      // Fetch payouts
-      const payoutData = await apiService.fetchPayouts(guard.id);
-      setPayouts(payoutData);
+      setPayouts(response.data || []);
     } catch (err) {
       setError('Failed to load data. Please check your connection.');
       console.error('Error loading payouts:', err);

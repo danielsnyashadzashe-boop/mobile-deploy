@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
+import { GuardProvider } from '../contexts/GuardContext';
 import '../global.css';
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
@@ -39,14 +40,16 @@ export default function RootLayout() {
   return (
     <ClerkProvider tokenCache={tokenCache} publishableKey={publishableKey}>
       <ClerkLoaded>
-        <SafeAreaProvider>
-          <StatusBar style="dark" backgroundColor="#ffffff" translucent={false} />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(tabs)" />
-          </Stack>
-        </SafeAreaProvider>
+        <GuardProvider>
+          <SafeAreaProvider>
+            <StatusBar style="dark" backgroundColor="#ffffff" translucent={false} />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="index" />
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(tabs)" />
+            </Stack>
+          </SafeAreaProvider>
+        </GuardProvider>
       </ClerkLoaded>
     </ClerkProvider>
   );

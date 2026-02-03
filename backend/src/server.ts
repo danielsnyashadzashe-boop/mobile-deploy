@@ -10,6 +10,7 @@ import commissionRoutes from './routes/commission'
 import tipsRoutes from './routes/tips'
 import payoutsRoutes from './routes/payouts'
 import transactionsRoutes from './routes/transactions'
+import mobileRoutes from './routes/mobile'
 
 // Load environment variables
 dotenv.config()
@@ -42,6 +43,7 @@ app.use('/api', commissionRoutes)
 app.use('/api', tipsRoutes)
 app.use('/api', payoutsRoutes)
 app.use('/api', transactionsRoutes)
+app.use('/api/mobile', mobileRoutes)
 
 // 404 handler
 app.use((req: Request, res: Response) => {

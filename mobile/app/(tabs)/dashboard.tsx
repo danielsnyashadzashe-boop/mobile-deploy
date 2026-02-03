@@ -22,20 +22,8 @@ import { mockCarGuard, mockTransactions, formatCurrency } from '../../data/mockD
 import { TippaLogo } from '../../components/TippaLogo';
 import { useUser } from '@clerk/clerk-expo';
 import { commissionService, CommissionInfo } from '../../services/commissionService';
-import apiService from '../../services/apiService';
-
-interface GuardData {
-  id: string;
-  guardId: string;
-  name: string;
-  surname: string;
-  email: string;
-  phone: string;
-  balance: number;
-  lifetimeEarnings: number;
-  status: string;
-  qrCode: string;
-}
+import { useGuard } from '../../contexts/GuardContext';
+import { getGuardProfile } from '../../services/mobileApiService';
 
 interface QRCodeData {
   guardId: string;
@@ -47,6 +35,7 @@ interface QRCodeData {
 
 export default function DashboardScreen() {
   const { user } = useUser();
+  const { guardData, refreshGuardData, isLoading: guardLoading } = useGuard();
   const [refreshing, setRefreshing] = useState(false);
   const [showAirtimeModal, setShowAirtimeModal] = useState(false);
   const [showElectricityModal, setShowElectricityModal] = useState(false);
@@ -55,7 +44,6 @@ export default function DashboardScreen() {
   const [electricityAmount, setElectricityAmount] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [meterNumber, setMeterNumber] = useState('');
-  const [guardData, setGuardData] = useState<GuardData | null>(null);
   const [qrCodeData, setQRCodeData] = useState<QRCodeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,50 +52,26 @@ export default function DashboardScreen() {
   const [exampleTip] = useState(20); // Show example for R20 tip
   const [commissionInfo, setCommissionInfo] = useState<CommissionInfo | null>(null);
 
-  // Fetch guard data and QR code
+  // Load QR code and commission data when guard data is available
   useEffect(() => {
-    loadGuardData();
-  }, [user]);
-
-  const loadGuardData = async () => {
-    if (!user?.primaryEmailAddress?.emailAddress) {
-      setError('No email found. Please sign in again.');
+    if (guardData && !guardLoading) {
+      loadAdditionalData();
+    } else if (!guardLoading && !guardData) {
+      setError('Guard profile not found. Please link your account.');
       setLoading(false);
-      return;
     }
+  }, [guardData, guardLoading]);
+
+  const loadAdditionalData = async () => {
+    if (!guardData) return;
 
     try {
       setError(null);
-      const email = user.primaryEmailAddress.emailAddress;
-      console.log('🔍 Fetching guard data for:', email);
+      console.log('🔍 Loading additional data for guard:', guardData.guardId);
 
-      // Fetch guard details using API service
-      const guard = await apiService.fetchGuardProfile(email);
-
-      if (!guard) {
-        setError('Guard profile not found. Please contact support.');
-        setLoading(false);
-        return;
-      }
-
-      setGuardData({
-        id: guard.id,
-        guardId: guard.id,
-        name: guard.name,
-        surname: '', // From guard name
-        email: guard.email,
-        phone: guard.phoneNumber,
-        balance: guard.balance,
-        lifetimeEarnings: guard.totalEarnings,
-        status: guard.status,
-        qrCode: guard.qrCode
-      });
-
-      console.log('✅ Guard data loaded:', guard.id);
-
-      // Fetch QR code URL
+      // Fetch QR code URL from admin API
       const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://api.nogadacarguard.co.za';
-      const qrResponse = await fetch(`${apiUrl}/api/qr/${guard.id}`);
+      const qrResponse = await fetch(`${apiUrl}/api/qr/${guardData.id}`);
 
       if (qrResponse.ok) {
         const qrResult = await qrResponse.json();
@@ -118,15 +82,15 @@ export default function DashboardScreen() {
       } else {
         // Use basic QR code if API fails
         setQRCodeData({
-          guardId: guard.id,
-          guardName: guard.name,
-          qrCode: `tippa://guard/${guard.id}`,
-          balance: guard.balance,
-          status: guard.status
+          guardId: guardData.guardId,
+          guardName: guardData.fullName,
+          qrCode: guardData.qrCodeUrl || `tippa://guard/${guardData.id}`,
+          balance: guardData.balance,
+          status: guardData.status
         });
       }
 
-      // Fetch commission rate
+      // Fetch commission rate from admin API
       const rate = await commissionService.getActiveCommissionRate();
       setCommissionRate(rate);
 
@@ -135,7 +99,7 @@ export default function DashboardScreen() {
       setCommissionInfo(info);
       console.log('✅ Commission rate loaded:', rate + '%');
     } catch (err) {
-      console.error('❌ Error loading guard data:', err);
+      console.error('❌ Error loading additional data:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to load data. Please check your connection.';
       setError(errorMessage);
     } finally {
@@ -143,10 +107,19 @@ export default function DashboardScreen() {
     }
   };
 
-  const onRefresh = React.useCallback(() => {
+  const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    loadGuardData().finally(() => setRefreshing(false));
-  }, [user]);
+    try {
+      // Refresh guard data from admin API
+      if (user?.id) {
+        await refreshGuardData(user.id);
+      }
+      // Reload QR code and commission data
+      await loadAdditionalData();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user, refreshGuardData]);
 
   const downloadQRCode = async () => {
     if (!qrViewRef.current) {
@@ -172,7 +145,7 @@ export default function DashboardScreen() {
       });
 
       // Create filename with guard info
-      const displayName = guardData ? `${guardData.name}_${guardData.surname}` : (user?.fullName || mockCarGuard.name);
+      const displayName = guardData?.fullName || user?.fullName || mockCarGuard.name;
       const guardName = displayName.replace(/[^a-zA-Z0-9]/g, '_');
       const guardId = guardData?.guardId || mockCarGuard.id;
       const filename = `TippaQR_${guardName}_${guardId}_300DPI.png`;
@@ -277,13 +250,13 @@ export default function DashboardScreen() {
           <View className="items-center mb-6">
             <Text className="text-white/80 text-sm">Welcome back,</Text>
             <Text className="text-white text-2xl font-bold">
-              {guardData ? `${guardData.name} ${guardData.surname}` : (user?.fullName || mockCarGuard.name)}
+              {guardData?.fullName || user?.fullName || mockCarGuard.name}
             </Text>
           </View>
 
           {/* QR Code Section - Prominent */}
           <View className="bg-white rounded-2xl p-6 shadow-md items-center">
-            {loading ? (
+            {(loading || guardLoading) ? (
               <View className="py-20">
                 <ActivityIndicator size="large" color="#5B94D3" />
                 <Text className="text-sm text-gray-500 mt-4">Loading QR code...</Text>
@@ -294,7 +267,11 @@ export default function DashboardScreen() {
                 <Text className="text-red-600 font-semibold mt-4 text-center">Unable to load data</Text>
                 <Text className="text-sm text-gray-500 mt-2 text-center px-8">{error}</Text>
                 <TouchableOpacity
-                  onPress={loadGuardData}
+                  onPress={() => {
+                    setLoading(true);
+                    setError(null);
+                    loadAdditionalData();
+                  }}
                   className="mt-4 bg-tippa-secondary px-6 py-2 rounded-lg"
                 >
                   <Text className="text-white text-sm font-medium">Retry</Text>
@@ -323,7 +300,7 @@ export default function DashboardScreen() {
                   }}
                 >
                   <QRCode
-                    value={qrCodeData?.qrCode || `tippa://guard/${guardData?.guardId || mockCarGuard.id}`}
+                    value={qrCodeData?.qrCode || guardData?.qrCodeUrl || `tippa://guard/${guardData?.id || mockCarGuard.id}`}
                     size={200}
                     color="#404040"
                     backgroundColor="#ffffff"
@@ -335,7 +312,7 @@ export default function DashboardScreen() {
                 {/* Guard Info */}
                 <View className="items-center mt-4">
                   <Text className="text-lg font-bold text-gray-900">
-                    {guardData ? `${guardData.name} ${guardData.surname}` : (user?.fullName || mockCarGuard.name)}
+                    {guardData?.fullName || user?.fullName || mockCarGuard.name}
                   </Text>
                   <Text className="text-sm text-gray-500">
                     ID: {guardData?.guardId || mockCarGuard.id}
