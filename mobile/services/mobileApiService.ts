@@ -318,6 +318,120 @@ function transformGuardData(data: any): GuardData {
   };
 }
 
+// ==================== VOUCHER PURCHASE ====================
+
+interface VoucherData {
+  pin: string;
+  serialNumber: string;
+  expiryDate: string;
+  amount: number;
+  transactionId: string;
+  reference: string;
+}
+
+interface PayoutResult {
+  method: 'VOUCHER' | 'BANK_TRANSFER';
+  amount: number;
+  previousBalance: number;
+  newBalance: number;
+  payoutId: string;
+  voucher?: VoucherData;
+  guard: {
+    guardId: string;
+    name: string;
+  };
+}
+
+/**
+ * Purchase a 1Voucher using guard's balance
+ * @param guardId - The guard's guardId (e.g., "GRD1234567ABC")
+ * @param amount - Amount in Rands (R1 - R4,000)
+ * @param notes - Optional notes for the transaction
+ */
+export async function purchaseVoucher(
+  guardId: string,
+  amount: number,
+  notes?: string
+): Promise<ApiResponse<PayoutResult>> {
+  try {
+    console.log('Purchasing voucher:', { guardId, amount });
+
+    const response = await fetch(`${API_BASE_URL}/api/payouts/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        guardId,
+        amount,
+        method: 'VOUCHER',
+        notes: notes || 'Mobile app voucher purchase',
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to purchase voucher',
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error purchasing voucher:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.',
+    };
+  }
+}
+
+/**
+ * Request a bank transfer payout
+ * @param guardId - The guard's guardId
+ * @param amount - Amount in Rands (minimum R50)
+ * @param notes - Optional notes
+ */
+export async function requestBankTransfer(
+  guardId: string,
+  amount: number,
+  notes?: string
+): Promise<ApiResponse<PayoutResult>> {
+  try {
+    console.log('Requesting bank transfer:', { guardId, amount });
+
+    const response = await fetch(`${API_BASE_URL}/api/payouts/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        guardId,
+        amount,
+        method: 'BANK_TRANSFER',
+        notes: notes || 'Mobile app bank transfer request',
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to request bank transfer',
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error requesting bank transfer:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.',
+    };
+  }
+}
+
+export type { VoucherData, PayoutResult };
+
 export default {
   verifyAccessCode,
   linkMobileAccount,
@@ -326,4 +440,6 @@ export default {
   getTransactions,
   getPayouts,
   updateActivity,
+  purchaseVoucher,
+  requestBankTransfer,
 };

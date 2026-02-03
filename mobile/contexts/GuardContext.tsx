@@ -29,6 +29,7 @@ interface GuardContextType {
   isLinked: boolean;
   isLoading: boolean;
   refreshGuardData: (clerkUserId?: string) => Promise<void>;
+  updateBalance: (newBalance: number) => Promise<void>;
 }
 
 const GuardContext = createContext<GuardContextType | undefined>(undefined);
@@ -102,6 +103,14 @@ export function GuardProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateBalance = async (newBalance: number) => {
+    if (!guardData) return;
+
+    const updatedData = { ...guardData, balance: newBalance };
+    await setGuardData(updatedData);
+    console.log('Updated guard balance to:', newBalance);
+  };
+
   return (
     <GuardContext.Provider
       value={{
@@ -111,6 +120,7 @@ export function GuardProvider({ children }: { children: ReactNode }) {
         isLinked: !!guardData,
         isLoading,
         refreshGuardData,
+        updateBalance,
       }}
     >
       {children}

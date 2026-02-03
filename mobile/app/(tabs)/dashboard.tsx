@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
+import { useRouter } from 'expo-router';
 import { mockCarGuard, mockTransactions, formatCurrency } from '../../data/mockData';
 import { TippaLogo } from '../../components/TippaLogo';
 import { useUser } from '@clerk/clerk-expo';
@@ -34,6 +35,7 @@ interface QRCodeData {
 }
 
 export default function DashboardScreen() {
+  const router = useRouter();
   const { user } = useUser();
   const { guardData, refreshGuardData, isLoading: guardLoading } = useGuard();
   const [refreshing, setRefreshing] = useState(false);
@@ -205,6 +207,9 @@ export default function DashboardScreen() {
         break;
       case 'electricity':
         setShowElectricityModal(true);
+        break;
+      case 'voucher':
+        router.push('/voucher-purchase');
         break;
     }
   };
@@ -402,6 +407,19 @@ export default function DashboardScreen() {
         <View className="px-6 mt-6">
           <Text className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</Text>
           <View className="flex-row flex-wrap justify-between">
+            {/* Buy Voucher - Primary Action */}
+            <TouchableOpacity
+              onPress={() => handleQuickAction('voucher')}
+              className="bg-emerald-50 rounded-xl p-4 shadow-sm mb-4 border border-emerald-200"
+              style={{ width: '48%' }}
+            >
+              <View className="bg-emerald-100 w-10 h-10 rounded-full items-center justify-center mb-2">
+                <Ionicons name="ticket-outline" size={20} color="#059669" />
+              </View>
+              <Text className="text-sm font-medium text-gray-900">Buy Voucher</Text>
+              <Text className="text-xs text-gray-500">Cash at stores</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               onPress={() => handleQuickAction('airtime')}
               className="bg-white rounded-xl p-4 shadow-sm mb-4"
