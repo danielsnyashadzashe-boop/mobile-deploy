@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,13 +10,22 @@ import {
   Modal,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useUser } from '@clerk/clerk-expo';
 import { mockTransactions, formatCurrency, formatDate } from '../../data/mockData';
+import { useGuard } from '../../contexts/GuardContext';
+import { getTransactions, Transaction } from '../../services/mobileApiService';
 
 export default function HistoryScreen() {
+  const { user } = useUser();
+  const { guardData, isLoading: guardLoading } = useGuard();
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [selectedPeriod, setSelectedPeriod] = useState('All Time');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
@@ -28,7 +37,7 @@ export default function HistoryScreen() {
 
   const periodOptions = [
     'Today',
-    'Yesterday', 
+    'Yesterday',
     'This Week',
     'This Month',
     'Last 7 Days',
@@ -36,12 +45,52 @@ export default function HistoryScreen() {
     'All Time'
   ];
 
-  const onRefresh = React.useCallback(() => {
+  // Load transactions when guard data is available
+  useEffect(() => {
+    if (guardData && !guardLoading && user?.id) {
+      loadData();
+    } else if (!guardLoading && !guardData) {
+      setError('Guard profile not found. Please link your account.');
+      setLoading(false);
+    }
+  }, [guardData, guardLoading, user]);
+
+  const loadData = async () => {
+    if (!user?.id) {
+      setError('Not authenticated. Please sign in again.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setError(null);
+      setLoading(true);
+
+      // Fetch transactions from admin API using clerkUserId
+      const response = await getTransactions(user.id, { limit: 100 });
+
+      if (!response.success) {
+        setError(response.error || 'Failed to load transactions');
+        setLoading(false);
+        return;
+      }
+
+      setTransactions(response.data?.transactions || []);
+      console.log(`✅ Loaded ${response.data?.transactions?.length || 0} transactions`);
+    } catch (err) {
+      console.error('❌ Error loading data:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load data. Please check your connection.';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 2000);
-  }, []);
+    await loadData();
+    setRefreshing(false);
+  }, [user]);
 
   // Helper function to check if a date falls within a specific period
   const isDateInPeriod = (dateString: string, period: string): boolean => {
@@ -91,7 +140,7 @@ export default function HistoryScreen() {
   };
 
   // Apply filters
-  const filteredTransactions = mockTransactions.filter((tx) => {
+  const filteredTransactions = transactions.filter((tx) => {
     // Period filter
     if (!isDateInPeriod(tx.date, selectedPeriod)) {
       return false;
@@ -394,15 +443,34 @@ export default function HistoryScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           ListEmptyComponent={
-            <View className="items-center justify-center py-20">
-              <Ionicons name="document-text-outline" size={48} color="#9CA3AF" />
-              <Text className="text-gray-500 mt-2 text-center">
-                No {selectedFilter !== 'all' ? selectedFilter : 'transactions'} found for {selectedPeriod}
-              </Text>
-              <Text className="text-gray-400 text-sm mt-1 text-center">
-                Try adjusting your filters
-              </Text>
-            </View>
+            loading ? (
+              <View className="items-center justify-center py-20">
+                <ActivityIndicator size="large" color="#5B94D3" />
+                <Text className="text-gray-500 mt-4">Loading transactions...</Text>
+              </View>
+            ) : error ? (
+              <View className="items-center justify-center py-20 px-8">
+                <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
+                <Text className="text-red-600 font-semibold mt-4 text-center">Unable to load transactions</Text>
+                <Text className="text-sm text-gray-500 mt-2 text-center">{error}</Text>
+                <TouchableOpacity
+                  onPress={loadData}
+                  className="mt-4 bg-tippa-secondary px-6 py-2 rounded-lg"
+                >
+                  <Text className="text-white text-sm font-medium">Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View className="items-center justify-center py-20">
+                <Ionicons name="document-text-outline" size={48} color="#9CA3AF" />
+                <Text className="text-gray-500 mt-2 text-center">
+                  No {selectedFilter !== 'all' ? selectedFilter : 'transactions'} found for {selectedPeriod}
+                </Text>
+                <Text className="text-gray-400 text-sm mt-1 text-center">
+                  Try adjusting your filters
+                </Text>
+              </View>
+            )
           }
           showsVerticalScrollIndicator={false}
         />
