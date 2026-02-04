@@ -9,29 +9,22 @@ import {
   Alert,
   TextInput,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
+import QRCode from 'react-native-qrcode-svg';
 import { mockCarGuard, mockTransactions, formatCurrency } from '../../data/mockData';
 import { TippaLogo } from '../../components/TippaLogo';
 import { useUser } from '@clerk/clerk-expo';
 import { commissionService, CommissionInfo } from '../../services/commissionService';
 import { useGuard } from '../../contexts/GuardContext';
 import { getGuardProfile } from '../../services/mobileApiService';
-
-interface QRCodeData {
-  guardId: string;
-  guardName: string;
-  qrCode: string; // The Netcash PayNow URL
-  balance: number;
-  status: string;
-}
 
 export default function DashboardScreen() {
   const { user } = useUser();
@@ -44,13 +37,14 @@ export default function DashboardScreen() {
   const [electricityAmount, setElectricityAmount] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [meterNumber, setMeterNumber] = useState('');
-  const [qrCodeData, setQRCodeData] = useState<QRCodeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const qrViewRef = useRef(null);
   const [commissionRate, setCommissionRate] = useState(0);
   const [exampleTip] = useState(20); // Show example for R20 tip
   const [commissionInfo, setCommissionInfo] = useState<CommissionInfo | null>(null);
+  const [qrImageLoading, setQrImageLoading] = useState(true);
+  const [qrImageError, setQrImageError] = useState(false);
 
   // Load QR code and commission data when guard data is available
   useEffect(() => {
@@ -68,27 +62,12 @@ export default function DashboardScreen() {
     try {
       setError(null);
       console.log('🔍 Loading additional data for guard:', guardData.guardId);
+      console.log('🔗 Raw QR Code (payment URL):', guardData.qrCode);
+      console.log('📷 QR Code URL from Cloudinary:', guardData.qrCodeUrl);
 
-      // Fetch QR code URL from admin API
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://api.nogadacarguard.co.za';
-      const qrResponse = await fetch(`${apiUrl}/api/qr/${guardData.id}`);
-
-      if (qrResponse.ok) {
-        const qrResult = await qrResponse.json();
-        if (qrResult.success && qrResult.data) {
-          setQRCodeData(qrResult.data);
-          console.log('✅ QR code loaded');
-        }
-      } else {
-        // Use basic QR code if API fails
-        setQRCodeData({
-          guardId: guardData.guardId,
-          guardName: guardData.fullName,
-          qrCode: guardData.qrCodeUrl || `tippa://guard/${guardData.id}`,
-          balance: guardData.balance,
-          status: guardData.status
-        });
-      }
+      // Reset QR image state when loading new data
+      setQrImageLoading(true);
+      setQrImageError(false);
 
       // Fetch commission rate from admin API
       const rate = await commissionService.getActiveCommissionRate();
@@ -286,27 +265,74 @@ export default function DashboardScreen() {
                   Show this to customers for tips
                 </Text>
                 <Text className="text-xs text-gray-500 mb-4">
-                  {qrCodeData ? 'Netcash PayNow QR Code' : 'Permanent QR Code'}
+                  Scan to tip
                 </Text>
                 <View
                   ref={qrViewRef}
                   collapsable={false}
                   style={{
                     backgroundColor: '#ffffff',
-                    padding: 20,
-                    borderRadius: 12,
-                    borderWidth: 2,
-                    borderColor: '#E5E7EB',
+                    padding: 16,
+                    borderRadius: 16,
+                    borderWidth: 3,
+                    borderColor: '#5B94D3',
+                    width: 280,
+                    height: 280,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.1,
+                    shadowRadius: 4,
+                    elevation: 3,
                   }}
                 >
-                  <QRCode
-                    value={qrCodeData?.qrCode || guardData?.qrCodeUrl || `tippa://guard/${guardData?.id || mockCarGuard.id}`}
-                    size={200}
-                    color="#404040"
-                    backgroundColor="#ffffff"
-                    enableLinearGradient={false}
-                    logo={undefined}
-                  />
+                  {guardData?.qrCode ? (
+                    // Generate clean QR code from payment URL - no branding, optimal for scanning
+                    <QRCode
+                      value={guardData.qrCode}
+                      size={240}
+                      backgroundColor="#ffffff"
+                      color="#000000"
+                      ecl="M"
+                    />
+                  ) : guardData?.qrCodeUrl ? (
+                    // Fallback to Cloudinary image if raw URL not available
+                    <>
+                      {qrImageLoading && (
+                        <View style={{ position: 'absolute', justifyContent: 'center', alignItems: 'center' }}>
+                          <ActivityIndicator size="large" color="#5B94D3" />
+                        </View>
+                      )}
+                      {qrImageError ? (
+                        <View style={{ alignItems: 'center' }}>
+                          <Ionicons name="qr-code-outline" size={80} color="#ccc" />
+                          <Text style={{ color: '#999', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+                            QR code not available
+                          </Text>
+                        </View>
+                      ) : (
+                        <Image
+                          source={{ uri: guardData.qrCodeUrl }}
+                          style={{ width: 240, height: 240 }}
+                          resizeMode="contain"
+                          onLoadStart={() => setQrImageLoading(true)}
+                          onLoadEnd={() => setQrImageLoading(false)}
+                          onError={() => {
+                            setQrImageLoading(false);
+                            setQrImageError(true);
+                          }}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <View style={{ alignItems: 'center' }}>
+                      <Ionicons name="qr-code-outline" size={80} color="#ccc" />
+                      <Text style={{ color: '#999', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+                        No QR code available{'\n'}Contact your administrator
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 {/* Guard Info */}
