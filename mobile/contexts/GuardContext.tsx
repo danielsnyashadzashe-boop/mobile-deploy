@@ -19,7 +19,8 @@ export interface GuardData {
   totalEarnings: number;
   status: string;
   rating?: number;
-  qrCodeUrl: string | null;
+  qrCode: string | null;  // Raw payment URL for generating clean QR code
+  qrCodeUrl: string | null;  // Cloudinary URL with branding
   location?: {
     id: string;
     name: string;

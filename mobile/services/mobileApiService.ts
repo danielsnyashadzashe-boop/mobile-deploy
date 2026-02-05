@@ -313,7 +313,8 @@ function transformGuardData(data: any): GuardData {
     totalEarnings: data.lifetimeEarnings || 0,
     status: data.status,
     rating: data.rating || 0,
-    qrCodeUrl: data.qrCodeUrl || null,
+    qrCode: data.qrCode || null,  // Raw payment URL
+    qrCodeUrl: data.qrCodeUrl || null,  // Cloudinary branded image
     location: data.location || null
   };
 }
