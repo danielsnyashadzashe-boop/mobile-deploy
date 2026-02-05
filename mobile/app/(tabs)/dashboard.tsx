@@ -23,6 +23,10 @@ import { useUser } from '@clerk/clerk-expo';
 import { commissionService, CommissionInfo } from '../../services/commissionService';
 import { useGuard } from '../../contexts/GuardContext';
 import { getGuardProfile } from '../../services/mobileApiService';
+import Toast from 'react-native-toast-message';
+
+// @ts-ignore
+const IS_DEV = __DEV__;
 
 interface QRCodeData {
   guardId: string;
@@ -35,7 +39,7 @@ interface QRCodeData {
 export default function DashboardScreen() {
   const router = useRouter();
   const { user } = useUser();
-  const { guardData, refreshGuardData, isLoading: guardLoading } = useGuard();
+  const { guardData, refreshGuardData, isLoading: guardLoading, resetSandboxBalance } = useGuard();
   const [refreshing, setRefreshing] = useState(false);
   const [downloadingQR, setDownloadingQR] = useState(false);
   const [qrCodeData, setQRCodeData] = useState<QRCodeData | null>(null);
@@ -224,6 +228,18 @@ export default function DashboardScreen() {
   const incomeWidth = maxAmount > 0 ? (income / maxAmount) * 100 : 0;
   const expenseWidth = maxAmount > 0 ? (expenses / maxAmount) * 100 : 0;
 
+  const handleResetSandboxBalance = async () => {
+    await resetSandboxBalance();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Toast.show({
+      type: 'success',
+      text1: 'Balance Reset',
+      text2: 'Sandbox balance set to R5,000',
+      position: 'top',
+      visibilityTime: 2000,
+    });
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top', 'left', 'right']}>
       <ScrollView
@@ -378,10 +394,23 @@ export default function DashboardScreen() {
         {/* Balance Card - Moved Down */}
         <View className="px-6 mt-6">
           <View className="bg-white rounded-2xl p-4 shadow-lg">
-            <Text className="text-gray-600 text-sm mb-1">Available Balance</Text>
-            <Text className="text-3xl font-bold text-gray-900">
-              {formatCurrency(guardData?.balance || mockCarGuard.balance)}
-            </Text>
+            <View className="flex-row justify-between items-start">
+              <View>
+                <Text className="text-gray-600 text-sm mb-1">Available Balance</Text>
+                <Text className="text-3xl font-bold text-gray-900">
+                  {formatCurrency(guardData?.balance || mockCarGuard.balance)}
+                </Text>
+              </View>
+              {/* Sandbox Reset Button - Only show in development */}
+              {IS_DEV && (
+                <TouchableOpacity
+                  onPress={handleResetSandboxBalance}
+                  className="bg-purple-100 px-3 py-1.5 rounded-lg"
+                >
+                  <Text className="text-purple-700 text-xs font-medium">Reset Balance</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             <View className="flex-row justify-between mt-4">
               <View>
                 <Text className="text-xs text-gray-500">Today's Earnings</Text>

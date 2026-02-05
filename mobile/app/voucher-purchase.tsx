@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   Animated,
   Easing,
   Platform,
@@ -19,6 +18,7 @@ import Toast from 'react-native-toast-message';
 import { useGuard } from '../contexts/GuardContext';
 import { purchaseVoucher, PayoutResult } from '../services/mobileApiService';
 import { formatCurrency } from '../data/mockData';
+import { ConfirmationModal } from '../components/ConfirmationModal';
 
 // Quick amount buttons
 const QUICK_AMOUNTS = [50, 100, 200, 500, 1000];
@@ -40,6 +40,7 @@ export default function VoucherPurchaseScreen() {
   const [result, setResult] = useState<PayoutResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pinCopied, setPinCopied] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Animation for loading spinner
   const spinAnim = useRef(new Animated.Value(0)).current;
@@ -82,72 +83,64 @@ export default function VoucherPurchaseScreen() {
     return null;
   };
 
-  // Handle voucher purchase
-  const handlePurchase = async () => {
+  // Handle voucher purchase - show confirmation modal
+  const handlePurchase = () => {
     if (!guardData || !isValidAmount) return;
-
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowConfirmModal(true);
+  };
 
-    // Confirmation alert
-    Alert.alert(
-      'Confirm Purchase',
-      `Purchase a R${parsedAmount.toFixed(2)} voucher?\n\nYour balance will be reduced from R${balance.toFixed(2)} to R${(balance - parsedAmount).toFixed(2)}.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Purchase',
-          style: 'default',
-          onPress: async () => {
-            setLoading(true);
-            setError(null);
+  // Execute the voucher purchase
+  const executePurchase = async () => {
+    if (!guardData) return;
 
-            try {
-              const response = await purchaseVoucher(
-                guardData.guardId,
-                parsedAmount,
-                notes || undefined
-              );
+    setLoading(true);
+    setError(null);
+    setShowConfirmModal(false);
 
-              if (response.success && response.data) {
-                setResult(response.data);
-                // Update local balance
-                await updateBalance(response.data.newBalance);
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                Toast.show({
-                  type: 'success',
-                  text1: 'Voucher Purchased!',
-                  text2: `Your R${parsedAmount.toFixed(2)} voucher is ready`,
-                  position: 'top',
-                  visibilityTime: 3000,
-                });
-              } else {
-                setError(response.error || 'Failed to purchase voucher');
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                Toast.show({
-                  type: 'error',
-                  text1: 'Purchase Failed',
-                  text2: response.error || 'Please try again',
-                  position: 'top',
-                  visibilityTime: 4000,
-                });
-              }
-            } catch (err: any) {
-              setError(err.message || 'Something went wrong');
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              Toast.show({
-                type: 'error',
-                text1: 'Error',
-                text2: err.message || 'Something went wrong',
-                position: 'top',
-                visibilityTime: 4000,
-              });
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
+    try {
+      const response = await purchaseVoucher(
+        guardData.guardId,
+        parsedAmount,
+        notes || undefined
+      );
+
+      if (response.success && response.data) {
+        setResult(response.data);
+        // Update local balance
+        await updateBalance(response.data.newBalance);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Toast.show({
+          type: 'success',
+          text1: 'Voucher Purchased!',
+          text2: `Your R${parsedAmount.toFixed(2)} voucher is ready`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      } else {
+        setError(response.error || 'Failed to purchase voucher');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Toast.show({
+          type: 'error',
+          text1: 'Purchase Failed',
+          text2: response.error || 'Please try again',
+          position: 'top',
+          visibilityTime: 4000,
+        });
+      }
+    } catch (err: any) {
+      setError(err.message || 'Something went wrong');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: err.message || 'Something went wrong',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Copy PIN to clipboard
@@ -483,6 +476,25 @@ export default function VoucherPurchaseScreen() {
           </Text>
         )}
       </ScrollView>
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        visible={showConfirmModal}
+        title="Confirm Purchase"
+        message={`Purchase a R${parsedAmount.toFixed(2)} voucher?`}
+        details={[
+          { label: 'Voucher Amount', value: `R${parsedAmount.toFixed(2)}` },
+          { label: 'Current Balance', value: `R${balance.toFixed(2)}` },
+          { label: 'Balance After', value: `R${(balance - parsedAmount).toFixed(2)}` },
+        ]}
+        icon="ticket-outline"
+        iconColor="#059669"
+        confirmText="Purchase Voucher"
+        confirmColor="#059669"
+        loading={loading}
+        onConfirm={executePurchase}
+        onCancel={() => setShowConfirmModal(false)}
+      />
     </SafeAreaView>
   );
 }

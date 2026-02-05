@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   ScrollView,
   Alert,
   ActivityIndicator,
@@ -18,9 +19,9 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
 import { useGuard } from '../contexts/GuardContext';
-import { ElectricityApiService } from '../services/flash/api/electricityApi';
-import { BUSINESS_RULES } from '../services/flash/utils/constants';
-import { validateMeterNumber } from '../services/flash/utils/validators';
+import { API_CONFIG, SANDBOX_TEST_DATA } from '../src/config/api';
+import { isValidMeterNumber } from '../src/services/flashApi';
+import { ConfirmationModal } from '../components/ConfirmationModal';
 
 interface SavedMeter {
   meterNumber: string;
@@ -38,22 +39,24 @@ interface MeterDetails {
 
 const ELECTRICITY_AMOUNTS = [50, 100, 200, 300, 500, 1000];
 const SAVED_METERS_KEY = '@saved_meters';
+const MIN_AMOUNT = 5;
+const MAX_AMOUNT = 5000;
 
 export default function ElectricityPurchaseScreen() {
   const router = useRouter();
   const { guardData, updateBalance } = useGuard();
-  const electricityApi = ElectricityApiService.getInstance();
 
   const [meterNumber, setMeterNumber] = useState('');
   const [amount, setAmount] = useState<number>(0);
   const [customAmount, setCustomAmount] = useState('');
-  const [loading, setLoading] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [meterDetails, setMeterDetails] = useState<MeterDetails | null>(null);
   const [savedMeters, setSavedMeters] = useState<SavedMeter[]>([]);
   const [meterLabel, setMeterLabel] = useState('');
   const [showSaveOption, setShowSaveOption] = useState(false);
   const [purchaseResult, setPurchaseResult] = useState<{ token: string; units: string } | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [purchasing, setPurchasing] = useState(false);
 
   const balance = guardData?.balance || 0;
 
@@ -102,9 +105,8 @@ export default function ElectricityPurchaseScreen() {
   };
 
   const handleLookup = async () => {
-    const validation = validateMeterNumber(meterNumber);
-    if (!validation.isValid) {
-      Alert.alert('Invalid Meter', validation.error || 'Please enter an 11-digit meter number');
+    if (!isValidMeterNumber(meterNumber)) {
+      Alert.alert('Invalid Meter', 'Please enter an 11-digit meter number');
       return;
     }
 
@@ -113,10 +115,19 @@ export default function ElectricityPurchaseScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const result = await electricityApi.lookupMeter(meterNumber);
+      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.ELECTRICITY_LOOKUP}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meterNumber: meterNumber.replace(/\D/g, ''),
+          amount: 100,
+        }),
+      });
+
+      const result = await response.json();
 
       if (result.success && result.data) {
-        setMeterDetails(result.data as unknown as MeterDetails);
+        setMeterDetails(result.data);
         setShowSaveOption(true);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
@@ -124,7 +135,7 @@ export default function ElectricityPurchaseScreen() {
         Toast.show({
           type: 'error',
           text1: 'Lookup Failed',
-          text2: result.error?.message || 'Could not find meter details',
+          text2: result.error || 'Could not find meter details',
           position: 'top',
           visibilityTime: 4000,
         });
@@ -159,91 +170,125 @@ export default function ElectricityPurchaseScreen() {
     return customAmount ? parseInt(customAmount, 10) : amount;
   };
 
-  const isValidMeter = (): boolean => {
-    const validation = validateMeterNumber(meterNumber);
-    return validation.isValid;
-  };
-
   const canPurchase = (): boolean => {
     const effectiveAmount = getEffectiveAmount();
     return (
-      isValidMeter() &&
+      isValidMeterNumber(meterNumber) &&
       meterDetails?.CanVend === true &&
-      effectiveAmount >= BUSINESS_RULES.ELECTRICITY.MIN_AMOUNT &&
-      effectiveAmount <= BUSINESS_RULES.ELECTRICITY.MAX_AMOUNT &&
+      effectiveAmount >= MIN_AMOUNT &&
+      effectiveAmount <= MAX_AMOUNT &&
       effectiveAmount <= balance
     );
   };
 
   const handlePurchase = async () => {
-    if (!canPurchase() || !meterDetails || !guardData) return;
+    console.log('🔴 handlePurchase called!');
+    const effectiveAmount = getEffectiveAmount();
+    console.log('Balance:', balance, 'Amount:', effectiveAmount, 'Meter:', meterNumber, 'Details:', meterDetails);
 
+    // Debug: Show why purchase can't proceed
+    if (!isValidMeterNumber(meterNumber)) {
+      console.log('❌ Invalid meter');
+      Toast.show({ type: 'error', text1: 'Invalid Meter', text2: 'Please enter a valid 11-digit meter number', position: 'top' });
+      return;
+    }
+    if (!meterDetails) {
+      console.log('❌ No meter details');
+      Toast.show({ type: 'error', text1: 'Lookup Required', text2: 'Please lookup the meter first', position: 'top' });
+      return;
+    }
+    if (!meterDetails.CanVend) {
+      console.log('❌ Cannot vend');
+      Toast.show({ type: 'error', text1: 'Cannot Vend', text2: 'This meter cannot be vended to', position: 'top' });
+      return;
+    }
+    if (effectiveAmount < MIN_AMOUNT) {
+      console.log('❌ Amount too low');
+      Toast.show({ type: 'error', text1: 'Invalid Amount', text2: `Minimum amount is R${MIN_AMOUNT}`, position: 'top' });
+      return;
+    }
+    if (effectiveAmount > MAX_AMOUNT) {
+      console.log('❌ Amount too high');
+      Toast.show({ type: 'error', text1: 'Invalid Amount', text2: `Maximum amount is R${MAX_AMOUNT}`, position: 'top' });
+      return;
+    }
+    if (effectiveAmount > balance) {
+      console.log('❌ Insufficient balance');
+      Toast.show({ type: 'error', text1: 'Insufficient Balance', text2: `Your balance is R${balance.toFixed(2)}. Reset from dashboard.`, position: 'top' });
+      return;
+    }
+    if (!guardData) {
+      console.log('❌ No guard data');
+      Toast.show({ type: 'error', text1: 'Error', text2: 'Guard profile not loaded', position: 'top' });
+      return;
+    }
+
+    // Show confirmation modal
+    setShowConfirmModal(true);
+  };
+
+  const executePurchase = async () => {
     const effectiveAmount = getEffectiveAmount();
 
-    Alert.alert(
-      'Confirm Purchase',
-      `Purchase R${effectiveAmount} electricity for meter ${meterNumber}?\n\nCustomer: ${meterDetails.CustomerName}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm',
-          onPress: async () => {
-            setLoading(true);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setPurchasing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-            try {
-              const result = await electricityApi.purchaseElectricity(
-                meterNumber,
-                effectiveAmount,
-                meterDetails.MunicipalityCode,
-                `ELEC_${guardData.guardId}_${Date.now()}`
-              );
+    try {
+      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.ELECTRICITY_PURCHASE}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meterNumber: meterNumber.replace(/\D/g, ''),
+          amount: effectiveAmount,
+          municipalityCode: meterDetails?.MunicipalityCode,
+          guardId: guardData?.guardId,
+        }),
+      });
 
-              if (result.success && result.data) {
-                // Update local balance
-                const newBalance = balance - effectiveAmount;
-                await updateBalance(newBalance);
+      const result = await response.json();
 
-                // Show success with token
-                setPurchaseResult({
-                  token: result.data.Token || 'Token sent via SMS',
-                  units: result.data.UnitsIssued?.toString() || 'N/A',
-                });
+      if (result.success && result.data) {
+        // Update local balance
+        const newBalance = balance - effectiveAmount;
+        await updateBalance(newBalance);
 
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                Toast.show({
-                  type: 'success',
-                  text1: 'Electricity Purchased!',
-                  text2: 'Token has been sent via SMS',
-                  position: 'top',
-                  visibilityTime: 3000,
-                });
-              } else {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                Toast.show({
-                  type: 'error',
-                  text1: 'Purchase Failed',
-                  text2: result.error?.message || 'Please try again',
-                  position: 'top',
-                  visibilityTime: 4000,
-                });
-              }
-            } catch (error: any) {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              Toast.show({
-                type: 'error',
-                text1: 'Error',
-                text2: error.message || 'Something went wrong',
-                position: 'top',
-                visibilityTime: 4000,
-              });
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
+        // Show success with token
+        setPurchaseResult({
+          token: result.data.token || 'Token sent via SMS',
+          units: result.data.units?.toString() || 'N/A',
+        });
+
+        setShowConfirmModal(false);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Toast.show({
+          type: 'success',
+          text1: 'Electricity Purchased!',
+          text2: 'Token has been generated',
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Toast.show({
+          type: 'error',
+          text1: 'Purchase Failed',
+          text2: result.error || 'Please try again',
+          position: 'top',
+          visibilityTime: 4000,
+        });
+      }
+    } catch (error: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: error.message || 'Something went wrong',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+    } finally {
+      setPurchasing(false);
+    }
   };
 
   const copyToken = async () => {
@@ -295,7 +340,7 @@ export default function ElectricityPurchaseScreen() {
           <View className="flex-row bg-blue-50 rounded-xl p-3 mb-6 border border-blue-200">
             <Ionicons name="information-circle" size={20} color="#2563eb" />
             <Text className="flex-1 ml-2 text-sm text-blue-800">
-              The token has also been sent to your registered phone number via SMS.
+              Enter this token on your prepaid meter to load your electricity units.
             </Text>
           </View>
 
@@ -371,10 +416,10 @@ export default function ElectricityPurchaseScreen() {
             />
             <TouchableOpacity
               className={`px-5 rounded-r-xl justify-center ${
-                lookingUp || !isValidMeter() ? 'bg-gray-400' : 'bg-amber-600'
+                lookingUp || !isValidMeterNumber(meterNumber) ? 'bg-gray-400' : 'bg-amber-600'
               }`}
               onPress={handleLookup}
-              disabled={lookingUp || !isValidMeter()}
+              disabled={lookingUp || !isValidMeterNumber(meterNumber)}
             >
               {lookingUp ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -382,6 +427,27 @@ export default function ElectricityPurchaseScreen() {
                 <Text className="text-white font-semibold">Lookup</Text>
               )}
             </TouchableOpacity>
+          </View>
+          {/* Sandbox Test Meters */}
+          <View className="mx-4 mt-3 p-3 bg-orange-50 rounded-xl border border-orange-200">
+            <Text className="text-xs font-semibold text-orange-800 mb-2">Sandbox Test Meters</Text>
+            <View className="flex-row flex-wrap">
+              {SANDBOX_TEST_DATA.METERS.map((test, index) => (
+                <TouchableOpacity
+                  key={index}
+                  className="flex-row items-center bg-white px-2 py-1.5 rounded-lg mr-2 mb-2 border border-orange-200"
+                  onPress={() => {
+                    setMeterNumber(test.number);
+                    setMeterDetails(null);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Text className="text-xs text-gray-700">{test.number}</Text>
+                  <Text className="text-[10px] text-gray-500 ml-1">({test.provider})</Text>
+                  <Text className="text-xs text-orange-600 font-semibold ml-2">Use</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
 
           {/* Meter Details */}
@@ -469,30 +535,54 @@ export default function ElectricityPurchaseScreen() {
             />
           </View>
           <Text className="text-xs text-gray-500 mx-4 mt-1">
-            Min R{BUSINESS_RULES.ELECTRICITY.MIN_AMOUNT} - Max R{BUSINESS_RULES.ELECTRICITY.MAX_AMOUNT}
+            Min R{MIN_AMOUNT} - Max R{MAX_AMOUNT}
           </Text>
 
           {/* Purchase Button */}
-          <TouchableOpacity
-            className={`flex-row items-center justify-center mx-4 mt-6 mb-6 py-4 rounded-xl ${
-              canPurchase() ? 'bg-amber-500' : 'bg-gray-400'
-            }`}
-            onPress={handlePurchase}
-            disabled={!canPurchase() || loading}
+          <Pressable
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginHorizontal: 16,
+              marginTop: 24,
+              marginBottom: 24,
+              paddingVertical: 16,
+              borderRadius: 12,
+              backgroundColor: canPurchase() ? '#F59E0B' : '#9CA3AF',
+              opacity: pressed ? 0.7 : 1,
+            })}
+            onPress={() => {
+              console.log('🟢 Button pressed!');
+              handlePurchase();
+            }}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="flash" size={20} color="#fff" />
-                <Text className="text-white text-base font-semibold ml-2">
-                  Buy R{getEffectiveAmount()} Electricity
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
+            <Ionicons name="flash" size={20} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600', marginLeft: 8 }}>
+              Buy R{getEffectiveAmount()} Electricity
+            </Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        visible={showConfirmModal}
+        title="Confirm Purchase"
+        message={`Purchase electricity for meter ${meterNumber}?`}
+        details={[
+          { label: 'Customer', value: meterDetails?.CustomerName || '-' },
+          { label: 'Meter Number', value: meterNumber },
+          { label: 'Amount', value: `R${getEffectiveAmount().toFixed(2)}` },
+        ]}
+        icon="flash"
+        iconColor="#F59E0B"
+        confirmText="Buy Electricity"
+        confirmColor="#F59E0B"
+        loading={purchasing}
+        onConfirm={executePurchase}
+        onCancel={() => setShowConfirmModal(false)}
+      />
     </SafeAreaView>
   );
 }

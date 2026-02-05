@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   ScrollView,
-  Alert,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -16,25 +15,34 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Toast from 'react-native-toast-message';
 import { useGuard } from '../contexts/GuardContext';
-import { AirtimeApiService } from '../services/flash/api/airtimeApi';
-import { NETWORK_PROVIDERS, BUSINESS_RULES } from '../services/flash/utils/constants';
-import { formatPhoneNumber, validatePhoneNumber } from '../services/flash/utils/validators';
+import { API_CONFIG, SANDBOX_TEST_DATA } from '../src/config/api';
+import { formatPhoneNumber, isValidPhoneNumber } from '../src/services/flashApi';
+import { ConfirmationModal } from '../components/ConfirmationModal';
+
+// Network providers
+const NETWORK_PROVIDERS = {
+  MTN: { code: 'MTN', name: 'MTN', color: '#FFCC00' },
+  VODACOM: { code: 'VDC', name: 'Vodacom', color: '#FF0000' },
+  CELL_C: { code: 'CLC', name: 'Cell C', color: '#0066CC' },
+  TELKOM: { code: 'TLK', name: 'Telkom', color: '#00A650' },
+};
 
 type NetworkKey = keyof typeof NETWORK_PROVIDERS;
 
-const AIRTIME_AMOUNTS = [10, 25, 50, 100, 200, 500];
+const AIRTIME_AMOUNTS = [5, 10, 20, 50, 100, 200];
+const MIN_AMOUNT = 2;
+const MAX_AMOUNT = 999;
 
 export default function AirtimePurchaseScreen() {
   const router = useRouter();
   const { guardData, updateBalance } = useGuard();
-  const airtimeApi = AirtimeApiService.getInstance();
 
   const [phoneNumber, setPhoneNumber] = useState('');
   const [amount, setAmount] = useState<number>(0);
   const [customAmount, setCustomAmount] = useState('');
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkKey | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [useOwnNumber, setUseOwnNumber] = useState(true);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [purchasing, setPurchasing] = useState(false);
 
   const networks: NetworkKey[] = ['MTN', 'VODACOM', 'CELL_C', 'TELKOM'];
   const balance = guardData?.balance || 0;
@@ -55,91 +63,119 @@ export default function AirtimePurchaseScreen() {
     return customAmount ? parseInt(customAmount, 10) : amount;
   };
 
-  const isValidPhone = (): boolean => {
-    if (!phoneNumber) return false;
-    const validation = validatePhoneNumber(phoneNumber);
-    return validation.isValid;
-  };
-
   const canPurchase = (): boolean => {
     const effectiveAmount = getEffectiveAmount();
     return (
       selectedNetwork !== null &&
-      isValidPhone() &&
-      effectiveAmount >= BUSINESS_RULES.AIRTIME.MIN_AMOUNT &&
-      effectiveAmount <= BUSINESS_RULES.AIRTIME.MAX_AMOUNT &&
+      isValidPhoneNumber(phoneNumber) &&
+      effectiveAmount >= MIN_AMOUNT &&
+      effectiveAmount <= MAX_AMOUNT &&
       effectiveAmount <= balance
     );
   };
 
   const handlePurchase = async () => {
-    if (!canPurchase() || !selectedNetwork || !guardData) return;
+    console.log('🔴 handlePurchase called!');
+    const effectiveAmount = getEffectiveAmount();
+    console.log('Balance:', balance, 'Amount:', effectiveAmount, 'Network:', selectedNetwork, 'Phone:', phoneNumber);
+
+    // Debug: Show why purchase can't proceed
+    if (!selectedNetwork) {
+      console.log('❌ No network selected');
+      Toast.show({ type: 'error', text1: 'Select Network', text2: 'Please select a network provider', position: 'top' });
+      return;
+    }
+    if (!isValidPhoneNumber(phoneNumber)) {
+      console.log('❌ Invalid phone');
+      Toast.show({ type: 'error', text1: 'Invalid Phone', text2: 'Please enter a valid SA phone number', position: 'top' });
+      return;
+    }
+    if (effectiveAmount < MIN_AMOUNT) {
+      console.log('❌ Amount too low');
+      Toast.show({ type: 'error', text1: 'Invalid Amount', text2: `Minimum amount is R${MIN_AMOUNT}`, position: 'top' });
+      return;
+    }
+    if (effectiveAmount > MAX_AMOUNT) {
+      console.log('❌ Amount too high');
+      Toast.show({ type: 'error', text1: 'Invalid Amount', text2: `Maximum amount is R${MAX_AMOUNT}`, position: 'top' });
+      return;
+    }
+    if (effectiveAmount > balance) {
+      console.log('❌ Insufficient balance');
+      Toast.show({ type: 'error', text1: 'Insufficient Balance', text2: `Your balance is R${balance.toFixed(2)}. Reset from dashboard.`, position: 'top' });
+      return;
+    }
+    if (!guardData) {
+      console.log('❌ No guard data');
+      Toast.show({ type: 'error', text1: 'Error', text2: 'Guard profile not loaded', position: 'top' });
+      return;
+    }
+    // Show confirmation modal
+    setShowConfirmModal(true);
+  };
+
+  const executePurchase = async () => {
+    if (!selectedNetwork || !guardData) return;
 
     const effectiveAmount = getEffectiveAmount();
     const networkInfo = NETWORK_PROVIDERS[selectedNetwork];
     const formattedPhone = formatPhoneNumber(phoneNumber);
 
-    Alert.alert(
-      'Confirm Purchase',
-      `Purchase R${effectiveAmount} ${networkInfo.name} airtime for ${formattedPhone}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm',
-          onPress: async () => {
-            setLoading(true);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setPurchasing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-            try {
-              const result = await airtimeApi.purchaseAirtime(
-                phoneNumber,
-                effectiveAmount,
-                networkInfo.code,
-                `AIRTIME_${guardData.guardId}_${Date.now()}`
-              );
+    try {
+      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.AIRTIME_PURCHASE}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber: formattedPhone,
+          amount: effectiveAmount,
+          network: networkInfo.code,
+          guardId: guardData.guardId,
+        }),
+      });
 
-              if (result.success) {
-                // Update local balance
-                const newBalance = balance - effectiveAmount;
-                await updateBalance(newBalance);
+      const result = await response.json();
 
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                Toast.show({
-                  type: 'success',
-                  text1: 'Airtime Purchased!',
-                  text2: `R${effectiveAmount} sent to ${formattedPhone}`,
-                  position: 'top',
-                  visibilityTime: 3000,
-                });
+      if (result.success) {
+        // Update local balance
+        const newBalance = balance - effectiveAmount;
+        await updateBalance(newBalance);
 
-                // Go back after success
-                setTimeout(() => router.back(), 1500);
-              } else {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                Toast.show({
-                  type: 'error',
-                  text1: 'Purchase Failed',
-                  text2: result.error?.message || 'Please try again',
-                  position: 'top',
-                  visibilityTime: 4000,
-                });
-              }
-            } catch (error: any) {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              Toast.show({
-                type: 'error',
-                text1: 'Error',
-                text2: error.message || 'Something went wrong',
-                position: 'top',
-                visibilityTime: 4000,
-              });
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
+        setShowConfirmModal(false);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Toast.show({
+          type: 'success',
+          text1: 'Airtime Purchased!',
+          text2: `R${effectiveAmount} sent to ${formattedPhone}`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
+
+        setTimeout(() => router.back(), 1500);
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Toast.show({
+          type: 'error',
+          text1: 'Purchase Failed',
+          text2: result.error || 'Please try again',
+          position: 'top',
+          visibilityTime: 4000,
+        });
+      }
+    } catch (error: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: error.message || 'Something went wrong',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+    } finally {
+      setPurchasing(false);
+    }
   };
 
   return (
@@ -194,41 +230,44 @@ export default function AirtimePurchaseScreen() {
 
           {/* Phone Number */}
           <Text className="text-sm font-semibold text-gray-600 mx-4 mt-4 mb-2">Phone Number</Text>
-          <View className="flex-row mx-4 mb-3">
-            <TouchableOpacity
-              className={`flex-1 py-2.5 items-center rounded-l-lg ${
-                useOwnNumber ? 'bg-blue-900' : 'bg-gray-200'
-              }`}
-              onPress={() => setUseOwnNumber(true)}
-            >
-              <Text className={`font-medium ${useOwnNumber ? 'text-white' : 'text-gray-600'}`}>
-                My Number
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className={`flex-1 py-2.5 items-center rounded-r-lg ${
-                !useOwnNumber ? 'bg-blue-900' : 'bg-gray-200'
-              }`}
-              onPress={() => setUseOwnNumber(false)}
-            >
-              <Text className={`font-medium ${!useOwnNumber ? 'text-white' : 'text-gray-600'}`}>
-                Other Number
-              </Text>
-            </TouchableOpacity>
-          </View>
-
           <TextInput
             className="bg-white mx-4 px-4 py-3.5 rounded-xl border border-gray-200 text-base"
-            placeholder="e.g. 0831234567"
+            placeholder="e.g. 0812345678"
             placeholderTextColor="#999"
             keyboardType="phone-pad"
             value={phoneNumber}
             onChangeText={setPhoneNumber}
             maxLength={12}
           />
-          {phoneNumber.length > 0 && !isValidPhone() && (
+          {phoneNumber.length > 0 && !isValidPhoneNumber(phoneNumber) && (
             <Text className="text-xs text-red-500 mx-4 mt-1">Enter a valid SA phone number</Text>
           )}
+
+          {/* Sandbox Test Phone Numbers */}
+          <View className="mx-4 mt-3 p-3 bg-orange-50 rounded-xl border border-orange-200">
+            <Text className="text-xs font-semibold text-orange-800 mb-2">Sandbox Test Phone Numbers</Text>
+            <View className="flex-row flex-wrap">
+              {SANDBOX_TEST_DATA.PHONE_NUMBERS.map((test, index) => (
+                <TouchableOpacity
+                  key={index}
+                  className="flex-row items-center bg-white px-2 py-1.5 rounded-lg mr-2 mb-2 border border-orange-200"
+                  onPress={() => {
+                    setPhoneNumber(test.number);
+                    // Auto-select network
+                    const networkKey = test.network === 'MTN' ? 'MTN' :
+                                       test.network === 'VODACOM' ? 'VODACOM' :
+                                       test.network === 'TELKOM' ? 'TELKOM' : null;
+                    if (networkKey) setSelectedNetwork(networkKey as NetworkKey);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Text className="text-xs text-gray-700">{test.number}</Text>
+                  <Text className="text-[10px] text-gray-500 ml-1">({test.network})</Text>
+                  <Text className="text-xs text-orange-600 font-semibold ml-2">Use</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
 
           {/* Amount Selection */}
           <Text className="text-sm font-semibold text-gray-600 mx-4 mt-4 mb-2">Select Amount</Text>
@@ -276,30 +315,54 @@ export default function AirtimePurchaseScreen() {
             />
           </View>
           <Text className="text-xs text-gray-500 mx-4 mt-1">
-            Min R{BUSINESS_RULES.AIRTIME.MIN_AMOUNT} - Max R{BUSINESS_RULES.AIRTIME.MAX_AMOUNT}
+            Min R{MIN_AMOUNT} - Max R{MAX_AMOUNT}
           </Text>
 
           {/* Purchase Button */}
-          <TouchableOpacity
-            className={`flex-row items-center justify-center mx-4 mt-6 mb-6 py-4 rounded-xl ${
-              canPurchase() ? 'bg-blue-600' : 'bg-gray-400'
-            }`}
-            onPress={handlePurchase}
-            disabled={!canPurchase() || loading}
+          <Pressable
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginHorizontal: 16,
+              marginTop: 24,
+              marginBottom: 24,
+              paddingVertical: 16,
+              borderRadius: 12,
+              backgroundColor: canPurchase() ? '#2563EB' : '#9CA3AF',
+              opacity: pressed ? 0.7 : 1,
+            })}
+            onPress={() => {
+              console.log('🟢 Button pressed!');
+              handlePurchase();
+            }}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="phone-portrait-outline" size={20} color="#fff" />
-                <Text className="text-white text-base font-semibold ml-2">
-                  Buy R{getEffectiveAmount()} Airtime
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
+            <Ionicons name="phone-portrait-outline" size={20} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600', marginLeft: 8 }}>
+              Buy R{getEffectiveAmount()} Airtime
+            </Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        visible={showConfirmModal}
+        title="Confirm Purchase"
+        message={`Purchase airtime for ${formatPhoneNumber(phoneNumber)}?`}
+        details={[
+          { label: 'Network', value: selectedNetwork ? NETWORK_PROVIDERS[selectedNetwork].name : '-' },
+          { label: 'Phone Number', value: formatPhoneNumber(phoneNumber) },
+          { label: 'Amount', value: `R${getEffectiveAmount().toFixed(2)}` },
+        ]}
+        icon="phone-portrait-outline"
+        iconColor="#2563EB"
+        confirmText="Buy Airtime"
+        confirmColor="#2563EB"
+        loading={purchasing}
+        onConfirm={executePurchase}
+        onCancel={() => setShowConfirmModal(false)}
+      />
     </SafeAreaView>
   );
 }

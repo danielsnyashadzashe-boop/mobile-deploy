@@ -10,6 +10,9 @@ const ONEVOUCHER_BASE_URL = process.env.ONEVOUCHER_SANDBOX_BASE_URL || 'https://
 const ONEVOUCHER_API_KEY = process.env.ONEVOUCHER_API_KEY || ''
 const ONEVOUCHER_ACCOUNT_NUMBER = process.env.ONEVOUCHER_ACCOUNT_NUMBER || ''
 
+// Check if we're in sandbox mode (skip database balance checks)
+const IS_SANDBOX = ONEVOUCHER_BASE_URL.includes('sandbox')
+
 // Type for Flash API token response
 interface FlashTokenResponse {
   access_token: string
@@ -279,29 +282,37 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
       })
     }
 
-    // Find guard by guardId
-    const guard = await prisma.carGuard.findUnique({
-      where: { guardId }
-    })
+    console.log(`🔧 Sandbox mode: ${IS_SANDBOX ? 'ENABLED (skipping DB balance check)' : 'DISABLED'}`)
 
-    if (!guard) {
-      return res.status(404).json({
-        success: false,
-        error: 'Guard not found'
+    // In sandbox mode, we don't need to look up the guard in DB
+    let guard: any = null
+    let previousBalance = amount // Default for sandbox
+
+    if (!IS_SANDBOX) {
+      // Find guard by guardId
+      guard = await prisma.carGuard.findUnique({
+        where: { guardId }
       })
-    }
 
-    // Check if guard has sufficient balance
-    if (guard.balance < amount) {
-      return res.status(400).json({
-        success: false,
-        error: 'Insufficient balance',
-        currentBalance: guard.balance,
-        requestedAmount: amount
-      })
-    }
+      if (!guard) {
+        return res.status(404).json({
+          success: false,
+          error: 'Guard not found'
+        })
+      }
 
-    const previousBalance = guard.balance
+      // Check if guard has sufficient balance
+      if (guard.balance < amount) {
+        return res.status(400).json({
+          success: false,
+          error: 'Insufficient balance',
+          currentBalance: guard.balance,
+          requestedAmount: amount
+        })
+      }
+
+      previousBalance = guard.balance
+    }
     const reference = `PAYOUT_${guardId}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 
     // Process based on method
@@ -310,35 +321,45 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
         // Purchase 1Voucher from Flash API
         const voucherData = await purchase1Voucher(amount, reference)
 
-        // Deduct from guard balance
-        const updatedGuard = await prisma.carGuard.update({
-          where: { id: guard.id },
-          data: {
-            balance: {
-              decrement: amount
+        let updatedBalance = previousBalance - amount
+        let payoutId = reference
+
+        // Only update database if not in sandbox mode
+        if (!IS_SANDBOX && guard) {
+          // Deduct from guard balance
+          const updatedGuard = await prisma.carGuard.update({
+            where: { id: guard.id },
+            data: {
+              balance: {
+                decrement: amount
+              }
             }
-          }
-        })
+          })
+          updatedBalance = updatedGuard.balance
 
-        // Create payout record
-        const payout = await prisma.payout.create({
-          data: {
-            guardId: guard.id,
-            amount,
-            status: 'COMPLETED'
-          }
-        })
+          // Create payout record
+          const payout = await prisma.payout.create({
+            data: {
+              guardId: guard.id,
+              amount,
+              status: 'COMPLETED'
+            }
+          })
+          payoutId = payout.id
 
-        // Create transaction record
-        await prisma.transaction.create({
-          data: {
-            guardId: guard.id,
-            type: 'VOUCHER_PURCHASE',
-            amount: -amount
-          }
-        })
+          // Create transaction record
+          await prisma.transaction.create({
+            data: {
+              guardId: guard.id,
+              type: 'VOUCHER_PURCHASE',
+              amount: -amount
+            }
+          })
 
-        console.log('✅ Voucher payout processed:', payout.id)
+          console.log('✅ Voucher payout processed:', payout.id)
+        } else {
+          console.log('✅ Voucher payout processed (sandbox mode):', reference)
+        }
 
         return res.json({
           success: true,
@@ -346,8 +367,8 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
             method: 'VOUCHER',
             amount,
             previousBalance,
-            newBalance: updatedGuard.balance,
-            payoutId: payout.id,
+            newBalance: updatedBalance,
+            payoutId,
             voucher: {
               pin: voucherData.pin,
               serialNumber: voucherData.serialNumber,
@@ -357,8 +378,8 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
               reference
             },
             guard: {
-              guardId: guard.guardId,
-              name: `${guard.name} ${guard.surname}`
+              guardId: guardId,
+              name: guard ? `${guard.name} ${guard.surname}` : 'Sandbox User'
             }
           }
         })
@@ -372,32 +393,41 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
       }
     } else {
       // Bank Transfer - create pending payout
-      const updatedGuard = await prisma.carGuard.update({
-        where: { id: guard.id },
-        data: {
-          balance: {
-            decrement: amount
+      let updatedBalance = previousBalance - amount
+      let payoutId = reference
+
+      if (!IS_SANDBOX && guard) {
+        const updatedGuard = await prisma.carGuard.update({
+          where: { id: guard.id },
+          data: {
+            balance: {
+              decrement: amount
+            }
           }
-        }
-      })
+        })
+        updatedBalance = updatedGuard.balance
 
-      const payout = await prisma.payout.create({
-        data: {
-          guardId: guard.id,
-          amount,
-          status: 'PENDING'
-        }
-      })
+        const payout = await prisma.payout.create({
+          data: {
+            guardId: guard.id,
+            amount,
+            status: 'PENDING'
+          }
+        })
+        payoutId = payout.id
 
-      await prisma.transaction.create({
-        data: {
-          guardId: guard.id,
-          type: 'BANK_TRANSFER',
-          amount: -amount
-        }
-      })
+        await prisma.transaction.create({
+          data: {
+            guardId: guard.id,
+            type: 'BANK_TRANSFER',
+            amount: -amount
+          }
+        })
 
-      console.log('✅ Bank transfer payout created:', payout.id)
+        console.log('✅ Bank transfer payout created:', payout.id)
+      } else {
+        console.log('✅ Bank transfer payout created (sandbox mode):', reference)
+      }
 
       return res.json({
         success: true,
@@ -405,11 +435,11 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
           method: 'BANK_TRANSFER',
           amount,
           previousBalance,
-          newBalance: updatedGuard.balance,
-          payoutId: payout.id,
+          newBalance: updatedBalance,
+          payoutId,
           guard: {
-            guardId: guard.guardId,
-            name: `${guard.name} ${guard.surname}`
+            guardId: guardId,
+            name: guard ? `${guard.name} ${guard.surname}` : 'Sandbox User'
           },
           message: 'Bank transfer request submitted. Processing within 24-48 hours.'
         }

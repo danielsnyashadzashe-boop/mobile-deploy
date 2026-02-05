@@ -10,6 +10,7 @@ import commissionRoutes from './routes/commission'
 import tipsRoutes from './routes/tips'
 import mobileRoutes from './routes/mobile'
 import payoutsRoutes from './routes/payouts'
+import flashRoutes from './routes/flash'
 
 // Load environment variables
 dotenv.config()
@@ -42,6 +43,7 @@ app.use('/api', commissionRoutes)
 app.use('/api', tipsRoutes)
 app.use('/api', mobileRoutes) // Mobile app endpoints
 app.use('/api', payoutsRoutes) // 1Voucher and payout endpoints
+app.use('/api', flashRoutes) // Flash API endpoints (airtime, electricity)
 
 // 404 handler
 app.use((req: Request, res: Response) => {
