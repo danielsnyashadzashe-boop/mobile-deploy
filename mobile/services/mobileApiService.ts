@@ -368,6 +368,253 @@ function transformGuardData(data: any): GuardData {
   };
 }
 
+// ============================================
+// Purchase API Functions
+// ============================================
+
+interface AirtimePurchaseRequest {
+  clerkUserId: string;
+  phoneNumber: string;
+  amount: number;
+  productCode: string;
+}
+
+interface AirtimePurchaseResponse {
+  message: string;
+  amount: number;
+  previousBalance: number;
+  newBalance: number;
+}
+
+interface ElectricityPurchaseRequest {
+  clerkUserId: string;
+  meterNumber: string;
+  amount: number;
+}
+
+interface ElectricityPurchaseResponse {
+  message: string;
+  meterNumber: string;
+  amount: number;
+  token: string;
+  units: string;
+  previousBalance: number;
+  newBalance: number;
+  customerName: string;
+}
+
+interface VoucherPurchaseRequest {
+  clerkUserId: string;
+  amount: number;
+}
+
+interface VoucherPurchaseResponse {
+  message: string;
+  amount: number;
+  voucherPin: string;
+  voucherSerial: string;
+  expiryDate: string;
+  previousBalance: number;
+  newBalance: number;
+}
+
+interface PayoutRequestData {
+  guardId: string;
+  amount: number;
+  notes?: string;
+}
+
+interface PayoutRequestResponse {
+  payoutId: string;
+  amount: number;
+  status: string;
+  note: string;
+}
+
+interface PayoutHistoryItem {
+  id: string;
+  amount: number;
+  status: 'PENDING' | 'APPROVED' | 'COMPLETED' | 'REJECTED';
+  requestDate: string;
+  processDate: string | null;
+  notes: string | null;
+  rejectionReason: string | null;
+  voucherPin: string | null;
+}
+
+// Network product codes
+export const NETWORK_CODES = {
+  MTN: '304',
+  VODACOM: '305',
+  CELL_C: '306',
+  TELKOM: '307',
+} as const;
+
+/**
+ * Purchase airtime for a phone number
+ */
+export async function purchaseAirtime(
+  params: AirtimePurchaseRequest
+): Promise<ApiResponse<AirtimePurchaseResponse>> {
+  try {
+    console.log('Purchasing airtime:', params);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/purchase/airtime`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to purchase airtime'
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error purchasing airtime:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.'
+    };
+  }
+}
+
+/**
+ * Purchase electricity for a meter
+ */
+export async function purchaseElectricity(
+  params: ElectricityPurchaseRequest
+): Promise<ApiResponse<ElectricityPurchaseResponse>> {
+  try {
+    console.log('Purchasing electricity:', params);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/purchase/electricity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to purchase electricity'
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error purchasing electricity:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.'
+    };
+  }
+}
+
+/**
+ * Purchase a cash voucher
+ */
+export async function purchaseVoucher(
+  params: VoucherPurchaseRequest
+): Promise<ApiResponse<VoucherPurchaseResponse>> {
+  try {
+    console.log('Purchasing voucher:', params);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/purchase/voucher`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to purchase voucher'
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error purchasing voucher:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.'
+    };
+  }
+}
+
+/**
+ * Request a payout (admin approval flow)
+ */
+export async function requestPayout(
+  params: PayoutRequestData
+): Promise<ApiResponse<PayoutRequestResponse>> {
+  try {
+    console.log('Requesting payout:', params);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/payout/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to submit payout request'
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error requesting payout:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.'
+    };
+  }
+}
+
+/**
+ * Get payout request history for a guard
+ */
+export async function getPayoutRequests(
+  guardId: string
+): Promise<ApiResponse<PayoutHistoryItem[]>> {
+  try {
+    console.log('Getting payout requests for guard:', guardId);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/payout/requests?guardId=${guardId}`);
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to fetch payout requests'
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error fetching payout requests:', error);
+    return {
+      success: false,
+      error: 'Failed to fetch payout requests'
+    };
+  }
+}
+
 export default {
   verifyAccessCode,
   linkMobileAccount,
@@ -377,4 +624,10 @@ export default {
   getPayouts,
   updateActivity,
   updateGuardProfile,
+  purchaseAirtime,
+  purchaseElectricity,
+  purchaseVoucher,
+  requestPayout,
+  getPayoutRequests,
+  NETWORK_CODES,
 };

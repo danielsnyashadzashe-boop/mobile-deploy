@@ -22,6 +22,8 @@ import { formatCurrency, formatDate } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
 import { getPayouts, getTransactions, Payout } from '../../services/mobileApiService';
 import apiService from '../../services/apiService';
+import PayoutRequestModal from '../../components/purchases/PayoutRequestModal';
+import PayoutHistoryModal from '../../components/purchases/PayoutHistoryModal';
 
 export default function PayoutsScreen() {
   const { user } = useUser();
@@ -32,6 +34,8 @@ export default function PayoutsScreen() {
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showAdminRequestModal, setShowAdminRequestModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [payoutType, setPayoutType] = useState('bank_transfer');
   const [amount, setAmount] = useState('');
   const [autoPayoutEnabled, setAutoPayoutEnabled] = useState(true);
@@ -207,27 +211,29 @@ export default function PayoutsScreen() {
   };
 
   const renderPayout = ({ item }: any) => {
-    const statusColors = getStatusColor(item.status);
-    
+    const statusColors = getStatusColor(item.status || 'pending');
+    const payoutType = item.type || 'payout';
+    const displayType = payoutType.replace('_', ' ').charAt(0).toUpperCase() + payoutType.slice(1).replace('_', ' ');
+
     return (
       <TouchableOpacity className="p-4">
         <View className="flex-row items-center justify-between mb-2">
           <View className="flex-row items-center flex-1">
             <View style={{ backgroundColor: '#5B94D333' }} className="w-10 h-10 rounded-full items-center justify-center mr-3">
-              <Ionicons name={getPayoutIcon(item.type) as any} size={20} color="#5B94D3" />
+              <Ionicons name={getPayoutIcon(payoutType) as any} size={20} color="#5B94D3" />
             </View>
             <View className="flex-1">
               <Text className="text-base font-semibold text-gray-900">
-                {item.type.replace('_', ' ').charAt(0).toUpperCase() + item.type.slice(1).replace('_', ' ')}
+                {displayType}
               </Text>
               <Text className="text-xs text-gray-500">
-                {item.voucherNumber}
+                {item.voucherNumber || 'Pending'}
               </Text>
             </View>
           </View>
           <View className={`px-3 py-1 rounded-full ${statusColors.split(' ')[1]}`}>
             <Text className={`text-xs font-medium capitalize ${statusColors.split(' ')[0]}`}>
-              {item.status}
+              {item.status || 'pending'}
             </Text>
           </View>
         </View>
@@ -256,8 +262,10 @@ export default function PayoutsScreen() {
 
   // Filter and pagination logic
   const filteredPayouts = payouts.filter(payout => {
-    const matchesSearch = payout.voucherNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         payout.type.toLowerCase().includes(searchQuery.toLowerCase());
+    const voucherNum = payout.voucherNumber || '';
+    const payoutType = payout.type || '';
+    const matchesSearch = voucherNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         payoutType.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = selectedStatus === 'all' || payout.status === selectedStatus;
     return matchesSearch && matchesStatus;
   });
@@ -327,13 +335,23 @@ export default function PayoutsScreen() {
               </View>
             )}
 
-            <TouchableOpacity
-              onPress={() => setShowRequestModal(true)}
-              style={{ backgroundColor: '#DEFF00' }}
-              className="rounded-lg py-4 items-center"
-            >
-              <Text style={{ color: '#11468F' }} className="font-semibold text-base">Request Payout</Text>
-            </TouchableOpacity>
+            {/* Payout Request Buttons */}
+            <View className="flex-row space-x-2">
+              <TouchableOpacity
+                onPress={() => setShowAdminRequestModal(true)}
+                style={{ backgroundColor: '#8B5CF6', flex: 1, marginRight: 6 }}
+                className="rounded-lg py-3 items-center"
+              >
+                <Text className="text-white font-medium text-sm">Request Admin Payout</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowHistoryModal(true)}
+                style={{ backgroundColor: '#5B94D3', flex: 1, marginLeft: 6 }}
+                className="rounded-lg py-3 items-center"
+              >
+                <Text className="text-white font-medium text-sm">View Requests</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -679,15 +697,23 @@ export default function PayoutsScreen() {
         </View>
       </Modal>
 
-      {/* Electricity Purchase Modal - Temporarily disabled due to React Query compatibility issue */}
-      {/* <ElectricityPurchaseModal
-        visible={showElectricityModal}
-        onClose={() => setShowElectricityModal(false)}
-        onSuccess={(transaction) => {
-          console.log('Electricity purchase successful:', transaction);
-          // Could add transaction to local state or trigger a refresh
+      {/* Admin Payout Request Modal */}
+      <PayoutRequestModal
+        visible={showAdminRequestModal}
+        onClose={() => setShowAdminRequestModal(false)}
+        onSuccess={(newBalance) => {
+          loadData(); // Refresh data after successful request
         }}
-      /> */}
+        balance={guardData?.balance || 0}
+        guardId={guardData?.id || ''}
+      />
+
+      {/* Payout Request History Modal */}
+      <PayoutHistoryModal
+        visible={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        guardId={guardData?.id || ''}
+      />
     </SafeAreaView>
   );
 }
