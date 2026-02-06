@@ -298,6 +298,55 @@ export async function updateActivity(clerkUserId: string): Promise<void> {
 }
 
 /**
+ * Update guard profile (personal info and banking details)
+ * NOTE: Requires backend endpoint PUT /api/mobile/guard/:clerkUserId/profile
+ */
+export async function updateGuardProfile(
+  clerkUserId: string,
+  updates: {
+    name?: string;
+    surname?: string;
+    phone?: string;
+    alternatePhone?: string;
+    bankName?: string;
+    accountNumber?: string;
+    accountHolder?: string;
+    branchCode?: string;
+    accountType?: string;
+  }
+): Promise<ApiResponse<GuardData>> {
+  try {
+    console.log('Updating guard profile for:', clerkUserId);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/guard/${clerkUserId}/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to update profile'
+      };
+    }
+
+    return {
+      success: true,
+      data: transformGuardData(result.data)
+    };
+  } catch (error) {
+    console.error('Error updating guard profile:', error);
+    return {
+      success: false,
+      error: 'Failed to update profile. Please check your connection.'
+    };
+  }
+}
+
+/**
  * Transform API response to GuardData format
  */
 function transformGuardData(data: any): GuardData {
@@ -327,4 +376,5 @@ export default {
   getTransactions,
   getPayouts,
   updateActivity,
+  updateGuardProfile,
 };
