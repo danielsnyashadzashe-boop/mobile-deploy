@@ -3,6 +3,10 @@ import prisma from '../lib/prisma'
 
 const router = Router()
 
+// Check if we're in sandbox mode (relax validation for testing)
+const ONEVOUCHER_BASE_URL = process.env.ONEVOUCHER_SANDBOX_BASE_URL || process.env.ONEVOUCHER_BASE_URL || ''
+const IS_SANDBOX = ONEVOUCHER_BASE_URL.includes('sandbox') || process.env.NODE_ENV === 'development'
+
 /**
  * Normalize South African phone numbers
  * Converts various formats to +27XXXXXXXXX
@@ -496,6 +500,236 @@ router.post('/mobile/guard/:clerkUserId/update-activity', async (req: Request, r
   } catch (error) {
     // Silently fail - not critical
     return res.json({ success: true })
+  }
+})
+
+// ==================== PAYOUT REQUEST ENDPOINTS ====================
+
+/**
+ * Generate a unique payout ID
+ */
+function generatePayoutId(): string {
+  const date = new Date()
+  const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase()
+  return `PAY-${dateStr}-${random}`
+}
+
+/**
+ * POST /api/mobile/payout/request
+ * Submit a new payout request (goes through admin approval workflow)
+ */
+router.post('/mobile/payout/request', async (req: Request, res: Response) => {
+  try {
+    const { guardId, amount, notes } = req.body
+
+    console.log('📝 New payout request:', { guardId, amount, sandbox: IS_SANDBOX })
+
+    // Validate required fields
+    if (!guardId || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'guardId and amount are required'
+      })
+    }
+
+    // Validate amount (minimum R1)
+    if (amount < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Minimum payout amount is R1'
+      })
+    }
+
+    // Find guard by guardId or database id (supports both formats)
+    let guard = await prisma.carGuard.findUnique({
+      where: { guardId }
+    })
+
+    // If not found by guardId, try by database id
+    if (!guard) {
+      guard = await prisma.carGuard.findUnique({
+        where: { id: guardId }
+      })
+    }
+
+    // In sandbox mode, if guard still not found, use mock data for testing
+    if (!guard && IS_SANDBOX) {
+      console.log('⚠️ Guard not found, using sandbox mock data')
+      const mockPayoutId = generatePayoutId()
+      return res.status(201).json({
+        success: true,
+        message: 'Payout request submitted successfully (sandbox mode)',
+        data: {
+          payoutId: mockPayoutId,
+          amount: amount,
+          status: 'PENDING',
+          requestedAt: new Date().toISOString(),
+          currentBalance: 1000, // Mock balance
+          note: 'SANDBOX MODE: Your request is pending admin approval. Balance will be deducted upon approval.'
+        }
+      })
+    }
+
+    if (!guard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Guard not found'
+      })
+    }
+
+    // Check if guard is active (skip in sandbox mode)
+    if (!IS_SANDBOX && guard.status !== 'ACTIVE') {
+      return res.status(400).json({
+        success: false,
+        error: 'Guard account is not active'
+      })
+    }
+
+    // Check if guard has sufficient balance (skip in sandbox mode)
+    if (!IS_SANDBOX && guard.balance < amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Insufficient balance',
+        currentBalance: guard.balance,
+        requestedAmount: amount
+      })
+    }
+
+    // Check for existing pending payout requests (skip in sandbox mode)
+    if (!IS_SANDBOX) {
+      const existingPending = await prisma.payout.findFirst({
+        where: {
+          guardId: guard.id,
+          status: 'PENDING'
+        }
+      })
+
+      if (existingPending) {
+        return res.status(400).json({
+          success: false,
+          error: 'You already have a pending payout request. Please wait for it to be processed.'
+        })
+      }
+    }
+
+    // Generate unique payout ID
+    const payoutId = generatePayoutId()
+
+    // Create payout request (status = PENDING, balance NOT deducted yet)
+    const payout = await prisma.payout.create({
+      data: {
+        payoutId,
+        guardId: guard.id,
+        amount,
+        status: 'PENDING',
+        notes: notes || null
+      }
+    })
+
+    console.log('✅ Payout request created:', payout.payoutId, IS_SANDBOX ? '(sandbox)' : '')
+
+    return res.status(201).json({
+      success: true,
+      message: 'Payout request submitted successfully',
+      data: {
+        payoutId: payout.payoutId,
+        amount: payout.amount,
+        status: payout.status,
+        requestedAt: payout.createdAt.toISOString(),
+        currentBalance: guard.balance,
+        note: 'Your request is pending admin approval. Balance will be deducted upon approval.'
+      }
+    })
+  } catch (error) {
+    console.error('❌ Error creating payout request:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to create payout request. Please try again.'
+    })
+  }
+})
+
+/**
+ * GET /api/mobile/payout/requests
+ * Get guard's payout requests (for tracking approval status)
+ */
+router.get('/mobile/payout/requests', async (req: Request, res: Response) => {
+  try {
+    const { guardId, status, limit = '20' } = req.query
+
+    if (!guardId) {
+      return res.status(400).json({
+        success: false,
+        error: 'guardId is required'
+      })
+    }
+
+    console.log('🔍 Fetching payout requests for guard:', guardId)
+
+    // Find guard by guardId or database id (supports both formats)
+    let guard = await prisma.carGuard.findUnique({
+      where: { guardId: guardId as string }
+    })
+
+    // If not found by guardId, try by database id
+    if (!guard) {
+      guard = await prisma.carGuard.findUnique({
+        where: { id: guardId as string }
+      })
+    }
+
+    if (!guard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Guard not found'
+      })
+    }
+
+    // Build query
+    const where: any = { guardId: guard.id }
+    if (status && status !== 'all') {
+      where.status = (status as string).toUpperCase()
+    }
+
+    // Fetch payout requests
+    const payouts = await prisma.payout.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: parseInt(limit as string)
+    })
+
+    // Format response
+    const formattedPayouts = payouts.map(p => ({
+      id: p.id,
+      payoutId: p.payoutId || `PAY-${p.id.slice(-8).toUpperCase()}`,
+      amount: p.amount,
+      status: p.status,
+      method: p.method,
+      requestedAt: p.createdAt.toISOString(),
+      approvedAt: p.approvedAt?.toISOString() || null,
+      processedAt: p.processedAt?.toISOString() || null,
+      completedAt: p.completedAt?.toISOString() || null,
+      notes: p.notes,
+      adminNotes: p.adminNotes,
+      rejectionReason: p.rejectionReason,
+      voucherPin: p.voucherPin,
+      voucherSerial: p.voucherSerial,
+      voucherExpiry: p.voucherExpiry?.toISOString() || null
+    }))
+
+    console.log(`✅ Found ${payouts.length} payout requests for guard:`, guardId)
+
+    return res.json({
+      success: true,
+      data: formattedPayouts
+    })
+  } catch (error) {
+    console.error('❌ Error fetching payout requests:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch payout requests'
+    })
   }
 })
 

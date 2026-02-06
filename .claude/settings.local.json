@@ -12,7 +12,8 @@
       "Bash(curl:*)",
       "Bash(npx tsc:*)",
       "Bash(timeout 2 npm run dev:*)",
-      "Bash(npx ts-node:*)"
+      "Bash(npx ts-node:*)",
+      "Bash(npx prisma generate:*)"
     ],
     "deny": [],
     "ask": []

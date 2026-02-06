@@ -337,15 +337,21 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
           })
           updatedBalance = updatedGuard.balance
 
-          // Create payout record
+          // Create payout record with voucher details
           const payout = await prisma.payout.create({
             data: {
+              payoutId: reference,
               guardId: guard.id,
               amount,
-              status: 'COMPLETED'
+              status: 'COMPLETED',
+              method: 'VOUCHER',
+              voucherPin: voucherData.pin,
+              voucherSerial: voucherData.serialNumber,
+              voucherExpiry: new Date(voucherData.expiryDate),
+              completedAt: new Date()
             }
           })
-          payoutId = payout.id
+          payoutId = payout.payoutId || payout.id
 
           // Create transaction record
           await prisma.transaction.create({
@@ -356,7 +362,7 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
             }
           })
 
-          console.log('✅ Voucher payout processed:', payout.id)
+          console.log('✅ Voucher payout processed:', payout.payoutId)
         } else {
           console.log('✅ Voucher payout processed (sandbox mode):', reference)
         }
@@ -409,12 +415,14 @@ router.post('/payouts/process', async (req: Request, res: Response) => {
 
         const payout = await prisma.payout.create({
           data: {
+            payoutId: reference,
             guardId: guard.id,
             amount,
-            status: 'PENDING'
+            status: 'PENDING',
+            method: 'BANK_TRANSFER'
           }
         })
-        payoutId = payout.id
+        payoutId = payout.payoutId || payout.id
 
         await prisma.transaction.create({
           data: {

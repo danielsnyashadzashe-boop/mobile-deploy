@@ -53,7 +53,7 @@ interface LinkAccountResponse {
   profileImage: string | null;
 }
 
-interface Transaction {
+export interface Transaction {
   id: string;
   type: string;
   amount: number;
@@ -66,7 +66,7 @@ interface Transaction {
   createdAt: string;
 }
 
-interface Payout {
+export interface Payout {
   id: string;
   voucherNumber: string | null;
   amount: number;
@@ -80,6 +80,25 @@ interface Payout {
   meterNumber: string | null;
   phoneNumber: string | null;
   provider: string | null;
+}
+
+// Payout Request interface (for approval workflow)
+export interface PayoutRequest {
+  id: string;
+  payoutId: string;
+  amount: number;
+  status: 'PENDING' | 'APPROVED' | 'PROCESSING' | 'COMPLETED' | 'REJECTED';
+  method?: 'VOUCHER' | 'BANK_TRANSFER';
+  requestedAt: string;
+  approvedAt?: string;
+  processedAt?: string;
+  completedAt?: string;
+  notes?: string;
+  adminNotes?: string;
+  rejectionReason?: string;
+  voucherPin?: string;
+  voucherSerial?: string;
+  voucherExpiry?: string;
 }
 
 /**
@@ -431,6 +450,99 @@ export async function requestBankTransfer(
   }
 }
 
+// ==================== PAYOUT REQUESTS (Approval Workflow) ====================
+
+interface PayoutRequestResult {
+  payoutId: string;
+  amount: number;
+  status: 'PENDING';
+  requestedAt: string;
+  currentBalance: number;
+  note: string;
+}
+
+/**
+ * Request a payout (goes through admin approval workflow)
+ * Use this for bank transfers that require admin approval
+ * @param guardId - The guard's guardId (e.g., "GRD1234567ABC")
+ * @param amount - Amount in Rands (minimum R1)
+ * @param notes - Optional notes for the admin
+ */
+export async function requestPayout(
+  guardId: string,
+  amount: number,
+  notes?: string
+): Promise<ApiResponse<PayoutRequestResult>> {
+  try {
+    console.log('Requesting payout:', { guardId, amount });
+    console.log('API URL:', `${API_BASE_URL}/api/mobile/payout/request`);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/payout/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        guardId,
+        amount,
+        notes: notes || '',
+      }),
+    });
+
+    console.log('Response status:', response.status, response.ok);
+    const result = await response.json();
+    console.log('Response body:', JSON.stringify(result, null, 2));
+
+    if (!response.ok || !result.success) {
+      console.log('Request failed:', result.error);
+      return {
+        success: false,
+        error: result.error || 'Failed to submit payout request',
+      };
+    }
+
+    console.log('Request successful, returning result');
+    return result;
+  } catch (error) {
+    console.error('Error requesting payout:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.',
+    };
+  }
+}
+
+/**
+ * Get guard's payout requests (for tracking approval status)
+ * @param guardId - The guard's guardId
+ * @param status - Optional filter by status
+ */
+export async function getPayoutRequests(
+  guardId: string,
+  status?: 'PENDING' | 'APPROVED' | 'PROCESSING' | 'COMPLETED' | 'REJECTED'
+): Promise<ApiResponse<PayoutRequest[]>> {
+  try {
+    let url = `${API_BASE_URL}/api/mobile/payout/requests?guardId=${guardId}`;
+    if (status) url += `&status=${status}`;
+
+    const response = await fetch(url);
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to fetch payout requests',
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error fetching payout requests:', error);
+    return {
+      success: false,
+      error: 'Failed to fetch payout requests',
+    };
+  }
+}
+
 export type { VoucherData, PayoutResult };
 
 export default {
@@ -443,4 +555,6 @@ export default {
   updateActivity,
   purchaseVoucher,
   requestBankTransfer,
+  requestPayout,
+  getPayoutRequests,
 };

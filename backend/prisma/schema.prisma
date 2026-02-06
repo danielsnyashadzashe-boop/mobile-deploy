@@ -553,12 +553,45 @@ model Tip {
 
 model Payout {
   id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  payoutId          String?          @unique
   guardId           String           @db.ObjectId
   amount            Float
-  status            String
+  status            PayoutStatus     @default(PENDING)
+  method            PayoutMethod?
+
+  // Guard notes
+  notes             String?
+
+  // Admin fields
+  adminNotes        String?
+  rejectionReason   String?
+  approvedBy        String?          @db.ObjectId
+  approvedAt        DateTime?
+  processedAt       DateTime?
+  completedAt       DateTime?
+
+  // Voucher fields (if method is VOUCHER)
+  voucherPin        String?
+  voucherSerial     String?
+  voucherExpiry     DateTime?
+
   createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   guard             CarGuard         @relation(fields: [guardId], references: [id])
+}
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  COMPLETED
+  REJECTED
+}
+
+enum PayoutMethod {
+  VOUCHER
+  BANK_TRANSFER
 }
 
 model Transaction {
