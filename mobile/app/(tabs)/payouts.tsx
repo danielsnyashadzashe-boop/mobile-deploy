@@ -20,7 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '@clerk/clerk-expo';
 import { formatCurrency, formatDate } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
-import { getPayouts, Payout } from '../../services/mobileApiService';
+import { getPayouts, getTransactions, Payout } from '../../services/mobileApiService';
+import apiService from '../../services/apiService';
 
 export default function PayoutsScreen() {
   const { user } = useUser();
@@ -42,12 +43,11 @@ export default function PayoutsScreen() {
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const itemsPerPage = 5;
 
-  // Mock data for enhanced features
-  const todayEarnings = 150.00;
-  const weekEarnings = 850.00;
-  const monthEarnings = 3200.00;
-  const payoutThreshold = 500.00;
-  const nextPayoutDate = '2025-09-05';
+  // Earnings data calculated from real transactions
+  const [todayEarnings, setTodayEarnings] = useState(0);
+  const [weekEarnings, setWeekEarnings] = useState(0);
+  const [monthEarnings, setMonthEarnings] = useState(0);
+  const payoutThreshold = 50.00; // Minimum payout amount
 
   // Load payouts when guard data is available
   useEffect(() => {
@@ -80,6 +80,43 @@ export default function PayoutsScreen() {
       }
 
       setPayouts(response.data || []);
+
+      // Fetch transactions to calculate earnings
+      const txResponse = await getTransactions(user.id, { limit: 100 });
+      if (txResponse.success && txResponse.data?.transactions) {
+        const txList = txResponse.data.transactions;
+
+        // Calculate today's earnings
+        const today = new Date().toISOString().split('T')[0];
+        const todayTips = txList
+          .filter((t: any) => t.type === 'TIP' && t.date === today)
+          .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+        setTodayEarnings(todayTips);
+
+        // Calculate this week's earnings
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekTips = txList
+          .filter((t: any) => {
+            if (t.type !== 'TIP') return false;
+            const txDate = new Date(t.createdAt || t.date);
+            return txDate >= weekAgo;
+          })
+          .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+        setWeekEarnings(weekTips);
+
+        // Calculate this month's earnings
+        const monthAgo = new Date();
+        monthAgo.setDate(monthAgo.getDate() - 30);
+        const monthTips = txList
+          .filter((t: any) => {
+            if (t.type !== 'TIP') return false;
+            const txDate = new Date(t.createdAt || t.date);
+            return txDate >= monthAgo;
+          })
+          .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+        setMonthEarnings(monthTips);
+      }
     } catch (err) {
       setError('Failed to load data. Please check your connection.');
       console.error('Error loading payouts:', err);
@@ -611,16 +648,18 @@ export default function PayoutsScreen() {
               )}
             </View>
 
-            {/* Payout Schedule */}
+            {/* Payout Info */}
             <View className="mb-6">
-              <Text className="text-lg font-semibold text-gray-900 mb-4">Payout Schedule</Text>
+              <Text className="text-lg font-semibold text-gray-900 mb-4">Payout Information</Text>
               <View className="bg-blue-50 rounded-lg p-4">
                 <View className="flex-row items-center mb-2">
                   <Ionicons name="information-circle" size={20} color="#3B82F6" />
-                  <Text className="text-blue-800 font-medium ml-2">Next Payout</Text>
+                  <Text className="text-blue-800 font-medium ml-2">Auto Payout</Text>
                 </View>
                 <Text className="text-blue-700">
-                  Your next automatic payout is scheduled for {formatDate(nextPayoutDate)}
+                  {autoPayoutEnabled
+                    ? `Automatic payouts will trigger when your balance exceeds R${autoPayoutThreshold}`
+                    : 'Automatic payouts are disabled. You can request manual payouts anytime.'}
                 </Text>
               </View>
             </View>
