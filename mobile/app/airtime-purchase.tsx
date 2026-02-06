@@ -14,9 +14,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Toast from 'react-native-toast-message';
+import { useUser } from '@clerk/clerk-expo';
 import { useGuard } from '../contexts/GuardContext';
-import { API_CONFIG, SANDBOX_TEST_DATA } from '../src/config/api';
-import { formatPhoneNumber, isValidPhoneNumber } from '../src/services/flashApi';
+import { SANDBOX_TEST_DATA, IS_SANDBOX_MODE, NETWORK_PRODUCTS } from '../src/config/api';
+import { formatPhoneNumber, isValidPhoneNumber, purchaseAirtime } from '../src/services/flashApi';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 
 // Network providers
@@ -35,7 +36,9 @@ const MAX_AMOUNT = 999;
 
 export default function AirtimePurchaseScreen() {
   const router = useRouter();
+  const { user } = useUser();
   const { guardData, updateBalance } = useGuard();
+  const clerkUserId = user?.id;
 
   const [phoneNumber, setPhoneNumber] = useState('');
   const [amount, setAmount] = useState<number>(0);
@@ -118,29 +121,38 @@ export default function AirtimePurchaseScreen() {
     if (!selectedNetwork || !guardData) return;
 
     const effectiveAmount = getEffectiveAmount();
-    const networkInfo = NETWORK_PROVIDERS[selectedNetwork];
     const formattedPhone = formatPhoneNumber(phoneNumber);
+
+    // Map our network keys to NETWORK_PRODUCTS keys
+    const networkMapping: Record<NetworkKey, keyof typeof NETWORK_PRODUCTS> = {
+      MTN: 'MTN',
+      VODACOM: 'VODACOM',
+      CELL_C: 'CELLC',
+      TELKOM: 'TELKOM',
+    };
+    const networkCode = networkMapping[selectedNetwork];
 
     setPurchasing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.AIRTIME_PURCHASE}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phoneNumber: formattedPhone,
-          amount: effectiveAmount,
-          network: networkInfo.code,
-          guardId: guardData.guardId,
-        }),
+      // Use new dual-mode purchaseAirtime function
+      // In production: uses clerkUserId, deducts from guard balance
+      // In sandbox: uses guardId, no balance deduction on backend
+      const result = await purchaseAirtime({
+        phoneNumber: formattedPhone,
+        amount: effectiveAmount,
+        networkCode,
+        guardId: guardData.guardId,
+        clerkUserId: clerkUserId,
       });
-
-      const result = await response.json();
 
       if (result.success) {
         // Update local balance
-        const newBalance = balance - effectiveAmount;
+        // In production, use newBalance from response; in sandbox, calculate locally
+        const newBalance = result.data?.newBalance !== undefined
+          ? result.data.newBalance
+          : balance - effectiveAmount;
         await updateBalance(newBalance);
 
         setShowConfirmModal(false);
@@ -152,6 +164,9 @@ export default function AirtimePurchaseScreen() {
           position: 'top',
           visibilityTime: 3000,
         });
+
+        // Log mode for debugging
+        console.log(`✅ Airtime purchase complete (${IS_SANDBOX_MODE ? 'SANDBOX' : 'PRODUCTION'} mode)`);
 
         setTimeout(() => router.back(), 1500);
       } else {

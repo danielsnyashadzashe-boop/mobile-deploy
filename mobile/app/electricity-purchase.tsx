@@ -18,9 +18,10 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
+import { useUser } from '@clerk/clerk-expo';
 import { useGuard } from '../contexts/GuardContext';
-import { API_CONFIG, SANDBOX_TEST_DATA } from '../src/config/api';
-import { isValidMeterNumber } from '../src/services/flashApi';
+import { SANDBOX_TEST_DATA, IS_SANDBOX_MODE } from '../src/config/api';
+import { isValidMeterNumber, lookupMeter, purchaseElectricity } from '../src/services/flashApi';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 
 interface SavedMeter {
@@ -34,7 +35,7 @@ interface MeterDetails {
   Address: string;
   MeterNumber: string;
   CanVend: boolean;
-  MunicipalityCode: string;
+  MunicipalityCode?: string;
 }
 
 const ELECTRICITY_AMOUNTS = [50, 100, 200, 300, 500, 1000];
@@ -44,7 +45,9 @@ const MAX_AMOUNT = 5000;
 
 export default function ElectricityPurchaseScreen() {
   const router = useRouter();
+  const { user } = useUser();
   const { guardData, updateBalance } = useGuard();
+  const clerkUserId = user?.id;
 
   const [meterNumber, setMeterNumber] = useState('');
   const [amount, setAmount] = useState<number>(0);
@@ -115,21 +118,18 @@ export default function ElectricityPurchaseScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.ELECTRICITY_LOOKUP}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          meterNumber: meterNumber.replace(/\D/g, ''),
-          amount: 100,
-        }),
+      // Use dual-mode lookupMeter function
+      const result = await lookupMeter({
+        meterNumber: meterNumber.replace(/\D/g, ''),
+        amount: 100,
+        clerkUserId: clerkUserId,
       });
-
-      const result = await response.json();
 
       if (result.success && result.data) {
         setMeterDetails(result.data);
         setShowSaveOption(true);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        console.log(`✅ Meter lookup complete (${IS_SANDBOX_MODE ? 'SANDBOX' : 'PRODUCTION'} mode)`);
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Toast.show({
@@ -234,22 +234,23 @@ export default function ElectricityPurchaseScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.ELECTRICITY_PURCHASE}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          meterNumber: meterNumber.replace(/\D/g, ''),
-          amount: effectiveAmount,
-          municipalityCode: meterDetails?.MunicipalityCode,
-          guardId: guardData?.guardId,
-        }),
+      // Use dual-mode purchaseElectricity function
+      // In production: uses clerkUserId, deducts from guard balance
+      // In sandbox: uses guardId, no balance deduction on backend
+      const result = await purchaseElectricity({
+        meterNumber: meterNumber.replace(/\D/g, ''),
+        amount: effectiveAmount,
+        municipalityCode: meterDetails?.MunicipalityCode,
+        guardId: guardData?.guardId,
+        clerkUserId: clerkUserId,
       });
-
-      const result = await response.json();
 
       if (result.success && result.data) {
         // Update local balance
-        const newBalance = balance - effectiveAmount;
+        // In production, use newBalance from response; in sandbox, calculate locally
+        const newBalance = result.data.newBalance !== undefined
+          ? result.data.newBalance
+          : balance - effectiveAmount;
         await updateBalance(newBalance);
 
         // Show success with token
@@ -267,6 +268,9 @@ export default function ElectricityPurchaseScreen() {
           position: 'top',
           visibilityTime: 3000,
         });
+
+        // Log mode for debugging
+        console.log(`✅ Electricity purchase complete (${IS_SANDBOX_MODE ? 'SANDBOX' : 'PRODUCTION'} mode)`);
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Toast.show({

@@ -25,21 +25,40 @@ const getBaseUrl = (): string => {
 export const API_CONFIG = {
   BASE_URL: getBaseUrl(),
   ENDPOINTS: {
-    // 1Voucher endpoints
+    // Mobile purchase endpoints (PRODUCTION - DEDUCTS FROM GUARD BALANCE)
+    // Use these with clerkUserId for real purchases
+    MOBILE_AIRTIME: '/api/mobile/purchase/airtime',
+    MOBILE_ELECTRICITY: '/api/mobile/purchase/electricity',
+    MOBILE_VOUCHER: '/api/mobile/purchase/voucher',
+    MOBILE_ELECTRICITY_LOOKUP: '/api/mobile/electricity/lookup',
+
+    // Legacy Flash API endpoints (SANDBOX - NO balance deduction)
+    // Use these with guardId for testing
+    FLASH_AIRTIME: '/api/flash/airtime/purchase',
+    FLASH_ELECTRICITY_LOOKUP: '/api/flash/electricity/lookup',
+    FLASH_ELECTRICITY: '/api/flash/electricity/purchase',
+
+    // 1Voucher endpoints (legacy - sandbox only)
     VOUCHER_AUTH: '/api/1voucher/auth',
     VOUCHER_PURCHASE: '/api/1voucher/purchase',
     VOUCHER_BALANCE: '/api/1voucher/balance',
     VOUCHER_REDEEM: '/api/1voucher/redeem',
 
-    // Flash API endpoints
+    // Legacy aliases for backward compatibility
     AIRTIME_PURCHASE: '/api/flash/airtime/purchase',
     ELECTRICITY_LOOKUP: '/api/flash/electricity/lookup',
     ELECTRICITY_PURCHASE: '/api/flash/electricity/purchase',
 
-    // Guard profile
+    // Guard profile & linking
     GUARD_PROFILE: '/api/guards/profile',
     MOBILE_LINK: '/api/mobile/link',
     MOBILE_PROFILE: '/api/mobile/profile',
+    MOBILE_CHECK_LINK: '/api/mobile/check-link',
+    MOBILE_GUARD: '/api/mobile/guard',
+    MOBILE_TRANSACTIONS: '/api/mobile/guard',
+
+    // Payouts
+    PAYOUT_PROCESS: '/api/payouts/process',
   },
 };
 
@@ -83,5 +102,12 @@ export const SANDBOX_TEST_DATA = {
     { number: '04287715629', provider: 'Cape Town', minAmount: 10 },
   ],
 };
+
+// Check if we're in production mode (use clerkUserId + balance deduction)
+// In dev mode or when using sandbox URLs, we skip balance deduction
+// @ts-ignore
+export const IS_PRODUCTION_MODE = !__DEV__;
+// @ts-ignore
+export const IS_SANDBOX_MODE = __DEV__;
 
 export default API_CONFIG;

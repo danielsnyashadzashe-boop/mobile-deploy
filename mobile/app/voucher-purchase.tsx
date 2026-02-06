@@ -15,10 +15,23 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
+import { useUser } from '@clerk/clerk-expo';
 import { useGuard } from '../contexts/GuardContext';
-import { purchaseVoucher, PayoutResult } from '../services/mobileApiService';
+import { purchaseVoucher, VoucherPurchaseResponse } from '../src/services/flashApi';
+import { IS_SANDBOX_MODE } from '../src/config/api';
 import { formatCurrency } from '../data/mockData';
 import { ConfirmationModal } from '../components/ConfirmationModal';
+
+// Result type from voucher purchase
+interface VoucherResult {
+  amount: number;
+  newBalance: number;
+  voucher: {
+    pin: string;
+    serialNumber: string;
+    expiryDate: string;
+  };
+}
 
 // Quick amount buttons
 const QUICK_AMOUNTS = [50, 100, 200, 500, 1000];
@@ -29,7 +42,9 @@ const MAX_VOUCHER_AMOUNT = 4000;
 
 export default function VoucherPurchaseScreen() {
   const router = useRouter();
+  const { user } = useUser();
   const { guardData, updateBalance } = useGuard();
+  const clerkUserId = user?.id;
 
   // Form state
   const [amount, setAmount] = useState('');
@@ -37,7 +52,7 @@ export default function VoucherPurchaseScreen() {
 
   // UI state
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<PayoutResult | null>(null);
+  const [result, setResult] = useState<VoucherResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pinCopied, setPinCopied] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -99,16 +114,37 @@ export default function VoucherPurchaseScreen() {
     setShowConfirmModal(false);
 
     try {
-      const response = await purchaseVoucher(
-        guardData.guardId,
-        parsedAmount,
-        notes || undefined
-      );
+      // Use dual-mode purchaseVoucher function from flashApi
+      // In production: uses clerkUserId, deducts from guard balance
+      // In sandbox: uses guardId, no balance deduction on backend
+      const response = await purchaseVoucher({
+        amount: parsedAmount,
+        guardId: guardData.guardId,
+        clerkUserId: clerkUserId,
+        reference: notes || undefined,
+      });
 
       if (response.success && response.data) {
-        setResult(response.data);
+        // Map response to our result format
+        const voucherData = response.data;
+        setResult({
+          amount: voucherData.amount,
+          newBalance: voucherData.newBalance !== undefined
+            ? voucherData.newBalance
+            : balance - parsedAmount,
+          voucher: {
+            pin: voucherData.pin || voucherData.voucherCode,
+            serialNumber: voucherData.serialNumber,
+            expiryDate: voucherData.expiryDate,
+          },
+        });
+
         // Update local balance
-        await updateBalance(response.data.newBalance);
+        const newBalance = voucherData.newBalance !== undefined
+          ? voucherData.newBalance
+          : balance - parsedAmount;
+        await updateBalance(newBalance);
+
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Toast.show({
           type: 'success',
@@ -117,6 +153,9 @@ export default function VoucherPurchaseScreen() {
           position: 'top',
           visibilityTime: 3000,
         });
+
+        // Log mode for debugging
+        console.log(`✅ Voucher purchase complete (${IS_SANDBOX_MODE ? 'SANDBOX' : 'PRODUCTION'} mode)`);
       } else {
         setError(response.error || 'Failed to purchase voucher');
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
