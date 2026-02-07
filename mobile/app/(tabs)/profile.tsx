@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { formatCurrency } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
+import { updateGuardProfile } from '../../services/mobileApiService';
 
 export default function ProfileScreen() {
   const { signOut } = useAuth();
@@ -54,10 +55,40 @@ export default function ProfileScreen() {
   }, [guardData, guardLoading]);
 
   const handleSave = async () => {
-    // In a real implementation, you would call the API to update the profile
-    // For now, just show success message
-    setIsEditing(false);
-    Alert.alert('Success', 'Profile updated successfully');
+    if (!user?.id) {
+      Alert.alert('Error', 'Not authenticated. Please sign in again.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Parse name into first and last name
+      const nameParts = profileData.name.trim().split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+
+      const response = await updateGuardProfile(user.id, {
+        name: firstName,
+        surname: lastName,
+        phone: profileData.phoneNumber,
+        bankName: profileData.bankName || undefined,
+        accountNumber: profileData.accountNumber || undefined,
+        branchCode: profileData.branchCode || undefined,
+        accountType: profileData.accountType || undefined,
+      });
+
+      if (response.success) {
+        setIsEditing(false);
+        Alert.alert('Success', 'Profile updated successfully');
+      } else {
+        Alert.alert('Error', response.error || 'Failed to update profile');
+      }
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      Alert.alert('Error', 'Failed to update profile. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogout = () => {

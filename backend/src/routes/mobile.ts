@@ -734,6 +734,94 @@ router.get('/mobile/payout/requests', async (req: Request, res: Response) => {
 })
 
 /**
+ * PUT /api/mobile/guard/:clerkUserId/profile
+ * Update guard profile (personal info and banking details)
+ */
+router.put('/mobile/guard/:clerkUserId/profile', async (req: Request, res: Response) => {
+  try {
+    const { clerkUserId } = req.params
+    const {
+      name,
+      surname,
+      phone,
+      alternatePhone,
+      bankName,
+      accountNumber,
+      accountHolder,
+      branchCode,
+      accountType
+    } = req.body
+
+    console.log('📝 Updating profile for Clerk user:', clerkUserId)
+
+    const guard = await prisma.carGuard.findFirst({
+      where: { clerkUserId }
+    })
+
+    if (!guard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Guard not found'
+      })
+    }
+
+    // Build update data - only include fields that are provided
+    const updateData: any = {}
+    if (name !== undefined) updateData.name = name
+    if (surname !== undefined) updateData.surname = surname
+    if (phone !== undefined) updateData.phone = phone
+    if (alternatePhone !== undefined) updateData.alternatePhone = alternatePhone
+    if (bankName !== undefined) updateData.bankName = bankName
+    if (accountNumber !== undefined) updateData.accountNumber = accountNumber
+    if (accountHolder !== undefined) updateData.accountHolder = accountHolder
+    if (branchCode !== undefined) updateData.branchCode = branchCode
+    if (accountType !== undefined) updateData.accountType = accountType
+
+    const updatedGuard = await prisma.carGuard.update({
+      where: { id: guard.id },
+      data: updateData,
+      include: {
+        location: true,
+        user: {
+          select: { email: true }
+        }
+      }
+    })
+
+    console.log('✅ Profile updated for guard:', updatedGuard.guardId)
+
+    return res.json({
+      success: true,
+      data: {
+        id: updatedGuard.id,
+        guardId: updatedGuard.guardId,
+        name: updatedGuard.name,
+        surname: updatedGuard.surname,
+        phone: updatedGuard.phone,
+        email: updatedGuard.user?.email || null,
+        balance: updatedGuard.balance || 0,
+        lifetimeEarnings: updatedGuard.lifetimeEarnings || 0,
+        qrCode: updatedGuard.qrCode,
+        qrCodeUrl: updatedGuard.qrCodeUrl,
+        status: updatedGuard.status,
+        rating: updatedGuard.rating || 0,
+        location: updatedGuard.location ? {
+          id: updatedGuard.location.id,
+          name: updatedGuard.location.name,
+          address: updatedGuard.location.address
+        } : null
+      }
+    })
+  } catch (error) {
+    console.error('❌ Error updating profile:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to update profile'
+    })
+  }
+})
+
+/**
  * POST /api/admin/guards/:guardId/generate-access-code
  * Generate a new 6-digit access code for a guard (admin endpoint)
  */
