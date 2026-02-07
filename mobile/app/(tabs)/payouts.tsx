@@ -20,7 +20,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '@clerk/clerk-expo';
 import { formatCurrency, formatDate } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
-import { getPayouts, Payout } from '../../services/mobileApiService';
+import { getPayouts, getTransactions, Payout } from '../../services/mobileApiService';
+import apiService from '../../services/apiService';
+import PayoutRequestModal from '../../components/purchases/PayoutRequestModal';
+import PayoutHistoryModal from '../../components/purchases/PayoutHistoryModal';
 
 export default function PayoutsScreen() {
   const { user } = useUser();
@@ -31,6 +34,8 @@ export default function PayoutsScreen() {
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showAdminRequestModal, setShowAdminRequestModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [payoutType, setPayoutType] = useState('bank_transfer');
   const [amount, setAmount] = useState('');
   const [autoPayoutEnabled, setAutoPayoutEnabled] = useState(true);
@@ -42,12 +47,11 @@ export default function PayoutsScreen() {
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const itemsPerPage = 5;
 
-  // Mock data for enhanced features
-  const todayEarnings = 150.00;
-  const weekEarnings = 850.00;
-  const monthEarnings = 3200.00;
-  const payoutThreshold = 500.00;
-  const nextPayoutDate = '2025-09-05';
+  // Earnings data calculated from real transactions
+  const [todayEarnings, setTodayEarnings] = useState(0);
+  const [weekEarnings, setWeekEarnings] = useState(0);
+  const [monthEarnings, setMonthEarnings] = useState(0);
+  const payoutThreshold = 50.00; // Minimum payout amount
 
   // Load payouts when guard data is available
   useEffect(() => {
@@ -80,6 +84,43 @@ export default function PayoutsScreen() {
       }
 
       setPayouts(response.data || []);
+
+      // Fetch transactions to calculate earnings
+      const txResponse = await getTransactions(user.id, { limit: 100 });
+      if (txResponse.success && txResponse.data?.transactions) {
+        const txList = txResponse.data.transactions;
+
+        // Calculate today's earnings
+        const today = new Date().toISOString().split('T')[0];
+        const todayTips = txList
+          .filter((t: any) => t.type === 'TIP' && t.date === today)
+          .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+        setTodayEarnings(todayTips);
+
+        // Calculate this week's earnings
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekTips = txList
+          .filter((t: any) => {
+            if (t.type !== 'TIP') return false;
+            const txDate = new Date(t.createdAt || t.date);
+            return txDate >= weekAgo;
+          })
+          .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+        setWeekEarnings(weekTips);
+
+        // Calculate this month's earnings
+        const monthAgo = new Date();
+        monthAgo.setDate(monthAgo.getDate() - 30);
+        const monthTips = txList
+          .filter((t: any) => {
+            if (t.type !== 'TIP') return false;
+            const txDate = new Date(t.createdAt || t.date);
+            return txDate >= monthAgo;
+          })
+          .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+        setMonthEarnings(monthTips);
+      }
     } catch (err) {
       setError('Failed to load data. Please check your connection.');
       console.error('Error loading payouts:', err);
@@ -170,27 +211,29 @@ export default function PayoutsScreen() {
   };
 
   const renderPayout = ({ item }: any) => {
-    const statusColors = getStatusColor(item.status);
-    
+    const statusColors = getStatusColor(item.status || 'pending');
+    const payoutType = item.type || 'payout';
+    const displayType = payoutType.replace('_', ' ').charAt(0).toUpperCase() + payoutType.slice(1).replace('_', ' ');
+
     return (
       <TouchableOpacity className="p-4">
         <View className="flex-row items-center justify-between mb-2">
           <View className="flex-row items-center flex-1">
             <View style={{ backgroundColor: '#5B94D333' }} className="w-10 h-10 rounded-full items-center justify-center mr-3">
-              <Ionicons name={getPayoutIcon(item.type) as any} size={20} color="#5B94D3" />
+              <Ionicons name={getPayoutIcon(payoutType) as any} size={20} color="#5B94D3" />
             </View>
             <View className="flex-1">
               <Text className="text-base font-semibold text-gray-900">
-                {item.type.replace('_', ' ').charAt(0).toUpperCase() + item.type.slice(1).replace('_', ' ')}
+                {displayType}
               </Text>
               <Text className="text-xs text-gray-500">
-                {item.voucherNumber}
+                {item.voucherNumber || 'Pending'}
               </Text>
             </View>
           </View>
           <View className={`px-3 py-1 rounded-full ${statusColors.split(' ')[1]}`}>
             <Text className={`text-xs font-medium capitalize ${statusColors.split(' ')[0]}`}>
-              {item.status}
+              {item.status || 'pending'}
             </Text>
           </View>
         </View>
@@ -219,8 +262,10 @@ export default function PayoutsScreen() {
 
   // Filter and pagination logic
   const filteredPayouts = payouts.filter(payout => {
-    const matchesSearch = payout.voucherNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         payout.type.toLowerCase().includes(searchQuery.toLowerCase());
+    const voucherNum = payout.voucherNumber || '';
+    const payoutType = payout.type || '';
+    const matchesSearch = voucherNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         payoutType.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = selectedStatus === 'all' || payout.status === selectedStatus;
     return matchesSearch && matchesStatus;
   });
@@ -290,13 +335,23 @@ export default function PayoutsScreen() {
               </View>
             )}
 
-            <TouchableOpacity
-              onPress={() => setShowRequestModal(true)}
-              style={{ backgroundColor: '#DEFF00' }}
-              className="rounded-lg py-4 items-center"
-            >
-              <Text style={{ color: '#11468F' }} className="font-semibold text-base">Request Payout</Text>
-            </TouchableOpacity>
+            {/* Payout Request Buttons */}
+            <View className="flex-row space-x-2">
+              <TouchableOpacity
+                onPress={() => setShowAdminRequestModal(true)}
+                style={{ backgroundColor: '#8B5CF6', flex: 1, marginRight: 6 }}
+                className="rounded-lg py-3 items-center"
+              >
+                <Text className="text-white font-medium text-sm">Request Admin Payout</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowHistoryModal(true)}
+                style={{ backgroundColor: '#5B94D3', flex: 1, marginLeft: 6 }}
+                className="rounded-lg py-3 items-center"
+              >
+                <Text className="text-white font-medium text-sm">View Requests</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -611,16 +666,18 @@ export default function PayoutsScreen() {
               )}
             </View>
 
-            {/* Payout Schedule */}
+            {/* Payout Info */}
             <View className="mb-6">
-              <Text className="text-lg font-semibold text-gray-900 mb-4">Payout Schedule</Text>
+              <Text className="text-lg font-semibold text-gray-900 mb-4">Payout Information</Text>
               <View className="bg-blue-50 rounded-lg p-4">
                 <View className="flex-row items-center mb-2">
                   <Ionicons name="information-circle" size={20} color="#3B82F6" />
-                  <Text className="text-blue-800 font-medium ml-2">Next Payout</Text>
+                  <Text className="text-blue-800 font-medium ml-2">Auto Payout</Text>
                 </View>
                 <Text className="text-blue-700">
-                  Your next automatic payout is scheduled for {formatDate(nextPayoutDate)}
+                  {autoPayoutEnabled
+                    ? `Automatic payouts will trigger when your balance exceeds R${autoPayoutThreshold}`
+                    : 'Automatic payouts are disabled. You can request manual payouts anytime.'}
                 </Text>
               </View>
             </View>
@@ -640,15 +697,23 @@ export default function PayoutsScreen() {
         </View>
       </Modal>
 
-      {/* Electricity Purchase Modal - Temporarily disabled due to React Query compatibility issue */}
-      {/* <ElectricityPurchaseModal
-        visible={showElectricityModal}
-        onClose={() => setShowElectricityModal(false)}
-        onSuccess={(transaction) => {
-          console.log('Electricity purchase successful:', transaction);
-          // Could add transaction to local state or trigger a refresh
+      {/* Admin Payout Request Modal */}
+      <PayoutRequestModal
+        visible={showAdminRequestModal}
+        onClose={() => setShowAdminRequestModal(false)}
+        onSuccess={(newBalance) => {
+          loadData(); // Refresh data after successful request
         }}
-      /> */}
+        balance={guardData?.balance || 0}
+        guardId={guardData?.id || ''}
+      />
+
+      {/* Payout Request History Modal */}
+      <PayoutHistoryModal
+        visible={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        guardId={guardData?.id || ''}
+      />
     </SafeAreaView>
   );
 }
