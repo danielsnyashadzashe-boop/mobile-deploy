@@ -83,4 +83,10 @@ export interface Transaction {
   time: string;
   status: 'pending' | 'completed' | 'failed';
   reference?: string;
+  metadata?: {
+    originalAmount?: number;
+    commissionRate?: number;
+    commissionAmount?: number;
+    guardReceivesAmount?: number;
+  };
 }

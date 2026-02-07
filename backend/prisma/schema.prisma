@@ -1,0 +1,670 @@
+// This is your Prisma schema file for mobile app
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== CORE USER MODELS ====================
+
+model User {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  email             String           @unique
+  username          String?          @unique
+  password          String
+  role              UserRole
+  isActive          Boolean          @default(true)
+  isVerified        Boolean          @default(false)
+  emailVerified     Boolean          @default(false)
+  phoneVerified     Boolean          @default(false)
+  lastLogin         DateTime?
+  loginAttempts     Int              @default(0)
+  lockedUntil       DateTime?
+  twoFactorEnabled  Boolean          @default(false)
+  twoFactorSecret   String?
+  refreshToken      String?
+  resetToken        String?
+  resetTokenExpiry  DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  carGuard          CarGuard?
+  customer          Customer?
+  manager           Manager?
+  admin             Admin?
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  sessions          Session[]
+}
+
+enum UserRole {
+  GUARD
+  CUSTOMER
+  MANAGER
+  ADMIN
+  SUPER_ADMIN
+  SUPPORT
+}
+
+model Session {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String           @db.ObjectId
+  token             String           @unique
+  deviceInfo        String?
+  ipAddress         String?
+  userAgent         String?
+  isActive          Boolean          @default(true)
+  expiresAt         DateTime
+  createdAt         DateTime         @default(now())
+
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==================== CAR GUARD ====================
+
+model CarGuard {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String           @unique @db.ObjectId
+  guardId           String           @unique
+  name              String
+  surname           String
+  displayName       String?
+  phone             String
+  alternatePhone    String?
+  idNumber          String           @unique
+  passportNumber    String?
+  profileImage      String?
+  balance           Float            @default(0)
+  lifetimeEarnings  Float            @default(0)
+  qrCode            String           @unique
+  qrCodeUrl         String?
+  nfcTag            String?          @unique
+
+  bankName          String?
+  accountNumber     String?
+  accountHolder     String?
+  branchCode        String?
+  accountType       String?
+  swiftCode         String?
+
+  locationId        String           @db.ObjectId
+  managerId         String?          @db.ObjectId
+  zoneId            String?          @db.ObjectId
+
+  status            GuardStatus      @default(PENDING)
+  verificationLevel VerificationLevel @default(BASIC)
+  rating            Float            @default(0)
+  totalRatings      Int              @default(0)
+  badges            String[]         @default([])
+
+  // Mobile app linking fields (no @unique - MongoDB doesn't support sparse unique indexes via Prisma)
+  // Uniqueness is enforced in application code
+  accessCode        String?
+  accessCodeExpiry  DateTime?
+  clerkUserId       String?
+
+  taxNumber         String?
+  workPermitNumber  String?
+  workPermitExpiry  DateTime?
+  emergencyContact  String?
+  emergencyPhone    String?
+
+  preferredLanguage String           @default("en")
+  notificationPrefs Json?
+  workingHours      Json?
+
+  onboardingStatus  OnboardingStatus @default(NOT_STARTED)
+  onboardingDate    DateTime?
+  deactivatedAt     DateTime?
+  deactivationReason String?
+  lastActiveAt      DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location          Location         @relation(fields: [locationId], references: [id])
+  manager           Manager?         @relation(fields: [managerId], references: [id])
+  zone              Zone?            @relation(fields: [zoneId], references: [id])
+  tipsReceived      Tip[]
+  payouts           Payout[]
+  transactions      Transaction[]
+  documents         GuardDocument[]
+  reviews           Review[]
+  shifts            Shift[]
+  incidents         Incident[]
+  commissions       Commission[]
+}
+
+enum GuardStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+  ON_LEAVE
+  TERMINATED
+}
+
+enum VerificationLevel {
+  BASIC
+  VERIFIED
+  PREMIUM
+  VIP
+}
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+// ==================== LOCATION ====================
+
+model Location {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  locationId        String           @unique
+  name              String
+  displayName       String?
+  type              LocationType     @default(MALL)
+
+  address           String
+  suburb            String?
+  city              String
+  province          String
+  country           String           @default("South Africa")
+  postalCode        String
+  latitude          Float?
+  longitude         Float?
+
+  contactPerson     String?
+  contactPhone      String?
+  contactEmail      String?
+  managementCompany String?
+
+  operatingHours    Json?
+  timezone          String           @default("Africa/Johannesburg")
+  currency          String           @default("ZAR")
+
+  guardsCount       Int              @default(0)
+  maxGuards         Int              @default(100)
+  activeGuards      Int              @default(0)
+  zonesCount        Int              @default(0)
+
+  commissionRate    Float            @default(10)
+  monthlyFee        Float?
+
+  features          String[]         @default([])
+  qrCodePrefix      String?
+  customBranding    Json?
+
+  status            LocationStatus   @default(ACTIVE)
+  activatedAt       DateTime?
+  deactivatedAt     DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  guards            CarGuard[]
+  managers          Manager[]
+  zones             Zone[]
+  tips              Tip[]
+  registrations     Registration[]
+  incidents         Incident[]
+  announcements     Announcement[]
+}
+
+enum LocationType {
+  MALL
+  OFFICE_PARK
+  RETAIL_STORE
+  RESTAURANT
+  HOTEL
+  HOSPITAL
+  SCHOOL
+  RESIDENTIAL
+  EVENT_VENUE
+  AIRPORT
+  OTHER
+}
+
+enum LocationStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+  SUSPENDED
+  PENDING
+}
+
+model Zone {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  zoneId            String           @unique
+  locationId        String           @db.ObjectId
+  name              String
+  description       String?
+  level             String?
+  section           String?
+  maxGuards         Int              @default(10)
+  activeGuards      Int              @default(0)
+  status            ZoneStatus       @default(ACTIVE)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  location          Location         @relation(fields: [locationId], references: [id])
+  guards            CarGuard[]
+  shifts            Shift[]
+  managerZones      ManagerZone[]
+}
+
+enum ZoneStatus {
+  ACTIVE
+  INACTIVE
+  FULL
+}
+
+// ==================== REGISTRATION ====================
+
+model Registration {
+  id                String             @id @default(auto()) @map("_id") @db.ObjectId
+  registrationId    String             @unique
+
+  name              String
+  surname           String
+  email             String
+  phone             String
+  alternatePhone    String?
+  idNumber          String?            @unique
+  passportNumber    String?
+  dateOfBirth       DateTime?
+  gender            String?
+  nationality       String             @default("South African")
+
+  addressLine1      String?
+  addressLine2      String?
+  suburb            String?
+  city              String?
+  province          String?
+  postalCode        String?
+
+  locationId        String             @db.ObjectId
+  managerId         String?            @db.ObjectId
+  preferredZones    String[]
+  experience        String?
+  languages         String[]
+
+  bankName          String?
+  accountNumber     String?
+  accountHolder     String?
+  branchCode        String?
+
+  emergencyName     String?
+  emergencyRelation String?
+  emergencyPhone    String?
+
+  status            RegistrationStatus @default(PENDING)
+  stage             RegistrationStage  @default(SUBMITTED)
+  verificationNotes String?
+
+  submittedAt       DateTime           @default(now())
+  reviewStartedAt   DateTime?
+  reviewedAt        DateTime?
+  reviewedBy        String?            @db.ObjectId
+  approvedAt        DateTime?
+  approvedBy        String?            @db.ObjectId
+  rejectedAt        DateTime?
+  rejectedBy        String?            @db.ObjectId
+  rejectionReason   String?
+
+  guardId           String?
+  guardCreatedAt    DateTime?
+
+  source            String?
+  referralCode      String?
+  ipAddress         String?
+  deviceInfo        String?
+
+  location          Location           @relation(fields: [locationId], references: [id])
+  manager           Manager?           @relation(fields: [managerId], references: [id])
+  documents         Document[]
+  verifications     Verification[]
+  onboarding        Onboarding?
+}
+
+enum RegistrationStatus {
+  PENDING
+  UNDER_REVIEW
+  DOCUMENTS_REQUIRED
+  VERIFICATION_PENDING
+  APPROVED
+  REJECTED
+  ON_HOLD
+  EXPIRED
+  CANCELLED
+}
+
+enum RegistrationStage {
+  SUBMITTED
+  DOCUMENT_UPLOAD
+  IDENTITY_VERIFICATION
+  BACKGROUND_CHECK
+  MANAGER_REVIEW
+  FINAL_APPROVAL
+  ONBOARDING
+  COMPLETED
+}
+
+// ==================== DOCUMENTS ====================
+
+model Document {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  documentId        String           @unique
+  registrationId    String?          @db.ObjectId
+  guardId           String?          @db.ObjectId
+  type              DocumentType
+  category          DocumentCategory @default(REGISTRATION)
+
+  fileName          String
+  fileUrl           String
+  fileSize          Int?
+  mimeType          String?
+  thumbnailUrl      String?
+
+  status            DocumentStatus   @default(PENDING)
+  verified          Boolean          @default(false)
+  verifiedAt        DateTime?
+  verifiedBy        String?          @db.ObjectId
+  verificationNotes String?
+
+  expiryDate        DateTime?
+  uploadedAt        DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  registration      Registration?    @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  guard             GuardDocument?
+}
+
+enum DocumentType {
+  ID_DOCUMENT
+  PASSPORT
+  DRIVERS_LICENSE
+  PROOF_OF_ADDRESS
+  BANK_STATEMENT
+  PHOTO
+  WORK_PERMIT
+  POLICE_CLEARANCE
+  TAX_CERTIFICATE
+  CONTRACT
+  OTHER
+}
+
+enum DocumentCategory {
+  REGISTRATION
+  COMPLIANCE
+  FINANCIAL
+  PERSONAL
+  TRAINING
+}
+
+enum DocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+  ARCHIVED
+}
+
+model GuardDocument {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  documentId        String           @unique @db.ObjectId
+  isPrimary         Boolean          @default(false)
+
+  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  document          Document         @relation(fields: [documentId], references: [id])
+}
+
+model Verification {
+  id                String             @id @default(auto()) @map("_id") @db.ObjectId
+  verificationId    String             @unique
+  registrationId    String             @db.ObjectId
+  type              VerificationType
+  status            VerificationStatus @default(PENDING)
+  provider          String?
+  result            Json?
+  score             Float?
+  performedAt       DateTime           @default(now())
+  performedBy       String?            @db.ObjectId
+  expiresAt         DateTime?
+
+  registration      Registration       @relation(fields: [registrationId], references: [id])
+}
+
+enum VerificationType {
+  IDENTITY
+  ADDRESS
+  CRIMINAL_RECORD
+  EMPLOYMENT
+  REFERENCE
+  BANK_ACCOUNT
+  PHONE
+  EMAIL
+}
+
+enum VerificationStatus {
+  PENDING
+  IN_PROGRESS
+  PASSED
+  FAILED
+  EXPIRED
+  ERROR
+}
+
+model Onboarding {
+  id                  String         @id @default(auto()) @map("_id") @db.ObjectId
+  onboardingId        String         @unique
+  registrationId      String         @unique @db.ObjectId
+  guardId             String         @db.ObjectId
+
+  profileCompleted    Boolean        @default(false)
+  documentsUploaded   Boolean        @default(false)
+  bankingSetup        Boolean        @default(false)
+  trainingCompleted   Boolean        @default(false)
+  qrCodeGenerated     Boolean        @default(false)
+  uniformCollected    Boolean        @default(false)
+  firstShiftScheduled Boolean        @default(false)
+
+  currentStep         Int            @default(1)
+  totalSteps          Int            @default(7)
+  completionPercent   Int            @default(0)
+
+  startedAt           DateTime       @default(now())
+  completedAt         DateTime?
+  lastActivityAt      DateTime       @updatedAt
+
+  notes               String?
+  blockers            String[]
+
+  registration        Registration   @relation(fields: [registrationId], references: [id])
+}
+
+// ==================== STUBS FOR OTHER MODELS ====================
+// Add minimal stubs to satisfy relations
+
+model Customer {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String           @unique @db.ObjectId
+  name              String
+  email             String
+  createdAt         DateTime         @default(now())
+
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tips              Tip[]
+}
+
+model Manager {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String           @unique @db.ObjectId
+  name              String
+  email             String
+  locationId        String           @db.ObjectId
+  createdAt         DateTime         @default(now())
+
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location          Location         @relation(fields: [locationId], references: [id])
+  guards            CarGuard[]
+  registrations     Registration[]
+  zones             ManagerZone[]
+}
+
+model ManagerZone {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  managerId         String           @db.ObjectId
+  zoneId            String           @db.ObjectId
+
+  manager           Manager          @relation(fields: [managerId], references: [id])
+  zone              Zone             @relation(fields: [zoneId], references: [id])
+}
+
+model Admin {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String           @unique @db.ObjectId
+  name              String
+  email             String
+  createdAt         DateTime         @default(now())
+
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Tip {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  customerId        String           @db.ObjectId
+  locationId        String           @db.ObjectId
+  amount            Float
+  createdAt         DateTime         @default(now())
+
+  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  customer          Customer         @relation(fields: [customerId], references: [id])
+  location          Location         @relation(fields: [locationId], references: [id])
+}
+
+model Payout {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  amount            Float
+  status            String
+  createdAt         DateTime         @default(now())
+
+  guard             CarGuard         @relation(fields: [guardId], references: [id])
+}
+
+model Transaction {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  type              String
+  amount            Float
+  createdAt         DateTime         @default(now())
+
+  guard             CarGuard         @relation(fields: [guardId], references: [id])
+}
+
+model Review {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  rating            Int
+  comment           String?
+  createdAt         DateTime         @default(now())
+
+  guard             CarGuard         @relation(fields: [guardId], references: [id])
+}
+
+model Shift {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  zoneId            String           @db.ObjectId
+  startTime         DateTime
+  endTime           DateTime?
+  createdAt         DateTime         @default(now())
+
+  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  zone              Zone             @relation(fields: [zoneId], references: [id])
+}
+
+model Incident {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  locationId        String           @db.ObjectId
+  description       String
+  createdAt         DateTime         @default(now())
+
+  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  location          Location         @relation(fields: [locationId], references: [id])
+}
+
+model Commission {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  transactionId     String?          @db.ObjectId
+  amount            Float
+  rate              Float
+  originalAmount    Float
+  guardReceives     Float
+  type              String           @default("TIP")
+  createdAt         DateTime         @default(now())
+
+  guard             CarGuard         @relation(fields: [guardId], references: [id])
+}
+
+model CommissionSetting {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  settingId         String           @unique
+  name              String
+  description       String?
+  percentage        Float
+  isActive          Boolean          @default(false)
+  appliesTo         String           @default("TIPS") // TIPS, PAYOUTS, ALL
+  setByAdminId      String?          @db.ObjectId
+  setByAdminName    String?
+  setByAdminEmail   String?
+  effectiveFrom     DateTime         @default(now())
+  effectiveUntil    DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model Notification {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String           @db.ObjectId
+  notificationId    String           @unique
+  type              String
+  channel           String
+  title             String
+  message           String
+  status            String
+  createdAt         DateTime         @default(now())
+
+  user              User             @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String           @db.ObjectId
+  action            String
+  details           String?
+  createdAt         DateTime         @default(now())
+
+  user              User             @relation(fields: [userId], references: [id])
+}
+
+model Announcement {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  locationId        String           @db.ObjectId
+  title             String
+  message           String
+  createdAt         DateTime         @default(now())
+
+  location          Location         @relation(fields: [locationId], references: [id])
+}

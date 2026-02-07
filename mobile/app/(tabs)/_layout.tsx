@@ -11,11 +11,11 @@ export default function TabLayout() {
           backgroundColor: '#ffffff',
           borderTopWidth: 1,
           borderTopColor: '#e5e7eb',
-          height: 60,
-          paddingBottom: 8,
+          height: 90, // Increased height for better iOS bottom safe area
+          paddingBottom: 34, // More space for iOS home indicator
           paddingTop: 8,
         },
-        tabBarActiveTintColor: '#10B981',
+        tabBarActiveTintColor: '#5B94D3',
         tabBarInactiveTintColor: '#6b7280',
         tabBarLabelStyle: {
           fontSize: 12,
@@ -23,6 +23,12 @@ export default function TabLayout() {
         },
       }}
     >
+      <Tabs.Screen
+        name="index"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
       <Tabs.Screen
         name="dashboard"
         options={{
@@ -38,6 +44,15 @@ export default function TabLayout() {
           title: 'History',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'time' : 'time-outline'} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="services"
+        options={{
+          title: 'Services',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'grid' : 'grid-outline'} size={24} color={color} />
           ),
         }}
       />

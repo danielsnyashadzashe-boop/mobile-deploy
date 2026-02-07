@@ -40,6 +40,14 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Markdown files
+*.md
+
 # Bundle artifacts
 *.jsbundle
 
@@ -63,3 +71,6 @@ web-build/
 
 expo-env.d.ts
 # @end expo-cli
+# Native project folders
+android/
+ios/

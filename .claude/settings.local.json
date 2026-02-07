@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__playwright-mcp__playwright_click",
+      "mcp__playwright-mcp__playwright_press_key",
+      "mcp__playwright-mcp__playwright_screenshot",
+      "mcp__playwright-mcp__playwright_get_visible_text",
+      "mcp__playwright-mcp__playwright_fill",
+      "mcp__playwright-mcp__playwright_navigate"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

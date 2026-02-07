@@ -22,10 +22,18 @@
       "bundler": "metro"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "bec82fc9-d123-4158-8104-5212a3637be6"
+      }
+    },
+    "owner": "retshidi_radebe"
   }
 }
