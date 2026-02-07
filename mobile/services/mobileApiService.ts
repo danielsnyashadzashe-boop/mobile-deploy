@@ -543,6 +543,115 @@ export async function getPayoutRequests(
   }
 }
 
+// ==================== PURCHASE API FUNCTIONS (Services Tab) ====================
+
+// Network product codes for airtime purchases
+export const NETWORK_CODES = {
+  MTN: '304',
+  VODACOM: '305',
+  CELL_C: '306',
+  TELKOM: '307',
+} as const;
+
+interface AirtimePurchaseRequest {
+  clerkUserId: string;
+  phoneNumber: string;
+  amount: number;
+  productCode: string;
+}
+
+interface AirtimePurchaseResponse {
+  message: string;
+  amount: number;
+  previousBalance: number;
+  newBalance: number;
+}
+
+interface ElectricityPurchaseRequest {
+  clerkUserId: string;
+  meterNumber: string;
+  amount: number;
+}
+
+interface ElectricityPurchaseResponse {
+  message: string;
+  meterNumber: string;
+  amount: number;
+  token: string;
+  units: string;
+  previousBalance: number;
+  newBalance: number;
+  customerName: string;
+}
+
+/**
+ * Purchase airtime for a phone number
+ */
+export async function purchaseAirtime(
+  params: AirtimePurchaseRequest
+): Promise<ApiResponse<AirtimePurchaseResponse>> {
+  try {
+    console.log('Purchasing airtime:', params);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/purchase/airtime`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to purchase airtime'
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error purchasing airtime:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.'
+    };
+  }
+}
+
+/**
+ * Purchase electricity for a meter
+ */
+export async function purchaseElectricity(
+  params: ElectricityPurchaseRequest
+): Promise<ApiResponse<ElectricityPurchaseResponse>> {
+  try {
+    console.log('Purchasing electricity:', params);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/purchase/electricity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to purchase electricity'
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error purchasing electricity:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.'
+    };
+  }
+}
+
 export type { VoucherData, PayoutResult };
 
 export default {
@@ -554,7 +663,10 @@ export default {
   getPayouts,
   updateActivity,
   purchaseVoucher,
+  purchaseAirtime,
+  purchaseElectricity,
   requestBankTransfer,
   requestPayout,
   getPayoutRequests,
+  NETWORK_CODES,
 };

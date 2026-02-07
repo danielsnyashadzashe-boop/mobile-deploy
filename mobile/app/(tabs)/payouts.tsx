@@ -47,12 +47,18 @@ export default function PayoutsScreen() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showVoucherResultModal, setShowVoucherResultModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showResultModal, setShowResultModal] = useState(false);
 
   // Payout request state
   const [payoutMethod, setPayoutMethod] = useState<'voucher' | 'bank_transfer' | null>(null);
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Result state (success/error feedback)
+  const [resultType, setResultType] = useState<'success' | 'error'>('success');
+  const [resultTitle, setResultTitle] = useState('');
+  const [resultMessage, setResultMessage] = useState('');
 
   // Voucher result state
   const [voucherResult, setVoucherResult] = useState<VoucherData | null>(null);
@@ -207,32 +213,39 @@ export default function PayoutsScreen() {
           // Refresh data
           loadData();
         } else {
-          Alert.alert('Error', result.error || 'Failed to purchase voucher');
+          setShowConfirmModal(false);
+          setResultType('error');
+          setResultTitle('Voucher Error');
+          setResultMessage(result.error || 'Failed to purchase voucher');
+          setShowResultModal(true);
         }
       } else {
         // Bank transfer request (requires admin approval)
-        console.log('Calling requestPayout with:', { guardId: guardData.guardId, amount: numAmount });
         const result = await requestPayout(guardData.guardId, numAmount, notes || undefined);
-        console.log('requestPayout result:', JSON.stringify(result, null, 2));
+
+        setShowConfirmModal(false);
 
         if (result.success && result.data) {
-          console.log('Payout request successful, showing alert');
-          setShowConfirmModal(false);
           resetForm();
-
-          Alert.alert(
-            'Request Submitted',
-            'Your bank transfer request has been submitted for admin approval. You will be notified when it is processed.',
-            [{ text: 'OK', onPress: () => loadData() }]
-          );
+          setResultType('success');
+          setResultTitle('Request Submitted');
+          setResultMessage('Your bank transfer request has been submitted for admin approval. You will be notified when it is processed.');
+          setShowResultModal(true);
+          loadData();
         } else {
-          console.log('Payout request failed:', result.error);
-          Alert.alert('Error', result.error || 'Failed to submit payout request');
+          setResultType('error');
+          setResultTitle('Request Failed');
+          setResultMessage(result.error || 'Failed to submit payout request');
+          setShowResultModal(true);
         }
       }
     } catch (err) {
       console.error('Payout error:', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      setShowConfirmModal(false);
+      setResultType('error');
+      setResultTitle('Error');
+      setResultMessage('Something went wrong. Please try again.');
+      setShowResultModal(true);
     } finally {
       setIsProcessing(false);
     }
@@ -1050,6 +1063,45 @@ export default function PayoutsScreen() {
               className="rounded-lg py-4 items-center"
             >
               <Text className="font-semibold text-white">Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Result Modal (Success/Error feedback) */}
+      <Modal
+        visible={showResultModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowResultModal(false)}
+      >
+        <View className="flex-1 justify-center items-center bg-black/50 px-6">
+          <View className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <View className="items-center mb-6">
+              <View className={`w-16 h-16 rounded-full items-center justify-center mb-4 ${
+                resultType === 'success' ? 'bg-green-100' : 'bg-red-100'
+              }`}>
+                <Ionicons
+                  name={resultType === 'success' ? 'checkmark-circle' : 'close-circle'}
+                  size={40}
+                  color={resultType === 'success' ? '#10B981' : '#EF4444'}
+                />
+              </View>
+              <Text className="text-xl font-bold text-gray-900 mb-2">{resultTitle}</Text>
+              <Text className="text-gray-500 text-center">{resultMessage}</Text>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => {
+                setShowResultModal(false);
+                if (resultType === 'success') {
+                  loadData();
+                }
+              }}
+              style={{ backgroundColor: resultType === 'success' ? '#10B981' : '#5B94D3' }}
+              className="rounded-lg py-4 items-center"
+            >
+              <Text className="font-semibold text-white">OK</Text>
             </TouchableOpacity>
           </View>
         </View>
