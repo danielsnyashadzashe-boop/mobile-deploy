@@ -24,7 +24,6 @@ import { useUser } from '@clerk/clerk-expo';
 import { commissionService, CommissionInfo } from '../../services/commissionService';
 import { useGuard } from '../../contexts/GuardContext';
 import { getGuardProfile, getTransactions } from '../../services/mobileApiService';
-import Toast from 'react-native-toast-message';
 
 // @ts-ignore
 const IS_DEV = __DEV__;
@@ -243,13 +242,7 @@ export default function DashboardScreen() {
   const handleResetSandboxBalance = async () => {
     await resetSandboxBalance();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Toast.show({
-      type: 'success',
-      text1: 'Balance Reset',
-      text2: 'Sandbox balance set to R5,000',
-      position: 'top',
-      visibilityTime: 2000,
-    });
+    Alert.alert('Balance Reset', 'Sandbox balance set to R5,000');
   };
 
   return (

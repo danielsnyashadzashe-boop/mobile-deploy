@@ -8,12 +8,12 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import Toast from 'react-native-toast-message';
 import { useUser } from '@clerk/clerk-expo';
 import { useGuard } from '../contexts/GuardContext';
 import { SANDBOX_TEST_DATA, IS_SANDBOX_MODE, NETWORK_PRODUCTS } from '../src/config/api';
@@ -85,32 +85,32 @@ export default function AirtimePurchaseScreen() {
     // Debug: Show why purchase can't proceed
     if (!selectedNetwork) {
       console.log('❌ No network selected');
-      Toast.show({ type: 'error', text1: 'Select Network', text2: 'Please select a network provider', position: 'top' });
+      Alert.alert('Select Network', 'Please select a network provider');
       return;
     }
     if (!isValidPhoneNumber(phoneNumber)) {
       console.log('❌ Invalid phone');
-      Toast.show({ type: 'error', text1: 'Invalid Phone', text2: 'Please enter a valid SA phone number', position: 'top' });
+      Alert.alert('Invalid Phone', 'Please enter a valid SA phone number');
       return;
     }
     if (effectiveAmount < MIN_AMOUNT) {
       console.log('❌ Amount too low');
-      Toast.show({ type: 'error', text1: 'Invalid Amount', text2: `Minimum amount is R${MIN_AMOUNT}`, position: 'top' });
+      Alert.alert('Invalid Amount', `Minimum amount is R${MIN_AMOUNT}`);
       return;
     }
     if (effectiveAmount > MAX_AMOUNT) {
       console.log('❌ Amount too high');
-      Toast.show({ type: 'error', text1: 'Invalid Amount', text2: `Maximum amount is R${MAX_AMOUNT}`, position: 'top' });
+      Alert.alert('Invalid Amount', `Maximum amount is R${MAX_AMOUNT}`);
       return;
     }
     if (effectiveAmount > balance) {
       console.log('❌ Insufficient balance');
-      Toast.show({ type: 'error', text1: 'Insufficient Balance', text2: `Your balance is R${balance.toFixed(2)}. Reset from dashboard.`, position: 'top' });
+      Alert.alert('Insufficient Balance', `Your balance is R${balance.toFixed(2)}. Reset from dashboard.`);
       return;
     }
     if (!guardData) {
       console.log('❌ No guard data');
-      Toast.show({ type: 'error', text1: 'Error', text2: 'Guard profile not loaded', position: 'top' });
+      Alert.alert('Error', 'Guard profile not loaded');
       return;
     }
     // Show confirmation modal
@@ -157,13 +157,7 @@ export default function AirtimePurchaseScreen() {
 
         setShowConfirmModal(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Toast.show({
-          type: 'success',
-          text1: 'Airtime Purchased!',
-          text2: `R${effectiveAmount} sent to ${formattedPhone}`,
-          position: 'top',
-          visibilityTime: 3000,
-        });
+        Alert.alert('Airtime Purchased!', `R${effectiveAmount} sent to ${formattedPhone}`);
 
         // Log mode for debugging
         console.log(`✅ Airtime purchase complete (${IS_SANDBOX_MODE ? 'SANDBOX' : 'PRODUCTION'} mode)`);
@@ -171,23 +165,11 @@ export default function AirtimePurchaseScreen() {
         setTimeout(() => router.back(), 1500);
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Toast.show({
-          type: 'error',
-          text1: 'Purchase Failed',
-          text2: result.error || 'Please try again',
-          position: 'top',
-          visibilityTime: 4000,
-        });
+        Alert.alert('Purchase Failed', result.error || 'Please try again');
       }
     } catch (error: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: error.message || 'Something went wrong',
-        position: 'top',
-        visibilityTime: 4000,
-      });
+      Alert.alert('Error', error.message || 'Something went wrong');
     } finally {
       setPurchasing(false);
     }
