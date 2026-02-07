@@ -17,7 +17,6 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Toast from 'react-native-toast-message';
 import { useUser } from '@clerk/clerk-expo';
 import { useGuard } from '../contexts/GuardContext';
 import { SANDBOX_TEST_DATA, IS_SANDBOX_MODE } from '../src/config/api';
@@ -92,13 +91,7 @@ export default function ElectricityPurchaseScreen() {
     await AsyncStorage.setItem(SAVED_METERS_KEY, JSON.stringify(updated));
     setShowSaveOption(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Toast.show({
-      type: 'success',
-      text1: 'Meter Saved',
-      text2: 'Meter saved for quick access',
-      position: 'top',
-      visibilityTime: 2000,
-    });
+    Alert.alert('Meter Saved', 'Meter saved for quick access');
   };
 
   const selectSavedMeter = (meter: SavedMeter) => {
@@ -132,23 +125,11 @@ export default function ElectricityPurchaseScreen() {
         console.log(`✅ Meter lookup complete (${IS_SANDBOX_MODE ? 'SANDBOX' : 'PRODUCTION'} mode)`);
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Toast.show({
-          type: 'error',
-          text1: 'Lookup Failed',
-          text2: result.error || 'Could not find meter details',
-          position: 'top',
-          visibilityTime: 4000,
-        });
+        Alert.alert('Lookup Failed', result.error || 'Could not find meter details');
       }
     } catch (error: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: 'Failed to lookup meter. Please try again.',
-        position: 'top',
-        visibilityTime: 4000,
-      });
+      Alert.alert('Error', 'Failed to lookup meter. Please try again.');
     } finally {
       setLookingUp(false);
     }
@@ -189,37 +170,37 @@ export default function ElectricityPurchaseScreen() {
     // Debug: Show why purchase can't proceed
     if (!isValidMeterNumber(meterNumber)) {
       console.log('❌ Invalid meter');
-      Toast.show({ type: 'error', text1: 'Invalid Meter', text2: 'Please enter a valid 11-digit meter number', position: 'top' });
+      Alert.alert('Invalid Meter', 'Please enter a valid 11-digit meter number');
       return;
     }
     if (!meterDetails) {
       console.log('❌ No meter details');
-      Toast.show({ type: 'error', text1: 'Lookup Required', text2: 'Please lookup the meter first', position: 'top' });
+      Alert.alert('Lookup Required', 'Please lookup the meter first');
       return;
     }
     if (!meterDetails.CanVend) {
       console.log('❌ Cannot vend');
-      Toast.show({ type: 'error', text1: 'Cannot Vend', text2: 'This meter cannot be vended to', position: 'top' });
+      Alert.alert('Cannot Vend', 'This meter cannot be vended to');
       return;
     }
     if (effectiveAmount < MIN_AMOUNT) {
       console.log('❌ Amount too low');
-      Toast.show({ type: 'error', text1: 'Invalid Amount', text2: `Minimum amount is R${MIN_AMOUNT}`, position: 'top' });
+      Alert.alert('Invalid Amount', `Minimum amount is R${MIN_AMOUNT}`);
       return;
     }
     if (effectiveAmount > MAX_AMOUNT) {
       console.log('❌ Amount too high');
-      Toast.show({ type: 'error', text1: 'Invalid Amount', text2: `Maximum amount is R${MAX_AMOUNT}`, position: 'top' });
+      Alert.alert('Invalid Amount', `Maximum amount is R${MAX_AMOUNT}`);
       return;
     }
     if (effectiveAmount > balance) {
       console.log('❌ Insufficient balance');
-      Toast.show({ type: 'error', text1: 'Insufficient Balance', text2: `Your balance is R${balance.toFixed(2)}. Reset from dashboard.`, position: 'top' });
+      Alert.alert('Insufficient Balance', `Your balance is R${balance.toFixed(2)}. Reset from dashboard.`);
       return;
     }
     if (!guardData) {
       console.log('❌ No guard data');
-      Toast.show({ type: 'error', text1: 'Error', text2: 'Guard profile not loaded', position: 'top' });
+      Alert.alert('Error', 'Guard profile not loaded');
       return;
     }
 
@@ -261,35 +242,17 @@ export default function ElectricityPurchaseScreen() {
 
         setShowConfirmModal(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Toast.show({
-          type: 'success',
-          text1: 'Electricity Purchased!',
-          text2: 'Token has been generated',
-          position: 'top',
-          visibilityTime: 3000,
-        });
+        Alert.alert('Electricity Purchased!', 'Token has been generated');
 
         // Log mode for debugging
         console.log(`✅ Electricity purchase complete (${IS_SANDBOX_MODE ? 'SANDBOX' : 'PRODUCTION'} mode)`);
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Toast.show({
-          type: 'error',
-          text1: 'Purchase Failed',
-          text2: result.error || 'Please try again',
-          position: 'top',
-          visibilityTime: 4000,
-        });
+        Alert.alert('Purchase Failed', result.error || 'Please try again');
       }
     } catch (error: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: error.message || 'Something went wrong',
-        position: 'top',
-        visibilityTime: 4000,
-      });
+      Alert.alert('Error', error.message || 'Something went wrong');
     } finally {
       setPurchasing(false);
     }
@@ -299,13 +262,7 @@ export default function ElectricityPurchaseScreen() {
     if (purchaseResult?.token) {
       await Clipboard.setStringAsync(purchaseResult.token);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      Toast.show({
-        type: 'success',
-        text1: 'Copied!',
-        text2: 'Token copied to clipboard',
-        position: 'top',
-        visibilityTime: 2000,
-      });
+      Alert.alert('Copied!', 'Token copied to clipboard');
     }
   };
 

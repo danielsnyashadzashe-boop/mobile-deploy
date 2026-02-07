@@ -8,13 +8,13 @@ import {
   Animated,
   Easing,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
-import Toast from 'react-native-toast-message';
 import { useUser } from '@clerk/clerk-expo';
 import { useGuard } from '../contexts/GuardContext';
 import { purchaseVoucher, VoucherPurchaseResponse } from '../src/services/flashApi';
@@ -146,37 +146,19 @@ export default function VoucherPurchaseScreen() {
         await updateBalance(newBalance);
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Toast.show({
-          type: 'success',
-          text1: 'Voucher Purchased!',
-          text2: `Your R${parsedAmount.toFixed(2)} voucher is ready`,
-          position: 'top',
-          visibilityTime: 3000,
-        });
+        Alert.alert('Voucher Purchased!', `Your R${parsedAmount.toFixed(2)} voucher is ready`);
 
         // Log mode for debugging
         console.log(`✅ Voucher purchase complete (${IS_SANDBOX_MODE ? 'SANDBOX' : 'PRODUCTION'} mode)`);
       } else {
         setError(response.error || 'Failed to purchase voucher');
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Toast.show({
-          type: 'error',
-          text1: 'Purchase Failed',
-          text2: response.error || 'Please try again',
-          position: 'top',
-          visibilityTime: 4000,
-        });
+        Alert.alert('Purchase Failed', response.error || 'Please try again');
       }
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: err.message || 'Something went wrong',
-        position: 'top',
-        visibilityTime: 4000,
-      });
+      Alert.alert('Error', err.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }
@@ -188,13 +170,7 @@ export default function VoucherPurchaseScreen() {
       await Clipboard.setStringAsync(result.voucher.pin);
       setPinCopied(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      Toast.show({
-        type: 'success',
-        text1: 'Copied!',
-        text2: 'PIN copied to clipboard',
-        position: 'top',
-        visibilityTime: 2000,
-      });
+      Alert.alert('Copied!', 'PIN copied to clipboard');
       setTimeout(() => setPinCopied(false), 2000);
     }
   };
