@@ -2,6 +2,11 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getGuardProfile } from '../services/mobileApiService';
 
+// Sandbox test balance for development/testing
+// @ts-ignore
+const IS_DEV = __DEV__;
+const SANDBOX_TEST_BALANCE = 5000; // R5000 for testing
+
 export interface GuardData {
   id: string;
   guardId: string;
@@ -30,6 +35,8 @@ interface GuardContextType {
   isLinked: boolean;
   isLoading: boolean;
   refreshGuardData: (clerkUserId?: string) => Promise<void>;
+  updateBalance: (newBalance: number) => Promise<void>;
+  resetSandboxBalance: () => Promise<void>;
 }
 
 const GuardContext = createContext<GuardContextType | undefined>(undefined);
@@ -49,6 +56,11 @@ export function GuardProvider({ children }: { children: ReactNode }) {
       const stored = await AsyncStorage.getItem(GUARD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
+        // In development/sandbox mode, use test balance if balance is 0
+        if (IS_DEV && parsed.balance === 0) {
+          parsed.balance = SANDBOX_TEST_BALANCE;
+          console.log('🧪 Sandbox mode: Using test balance of R', SANDBOX_TEST_BALANCE);
+        }
         setGuardDataState(parsed);
         console.log('Loaded guard data from storage:', parsed.guardId);
       }
@@ -60,6 +72,11 @@ export function GuardProvider({ children }: { children: ReactNode }) {
   };
 
   const setGuardData = async (data: GuardData | null) => {
+    // In development/sandbox mode, use test balance if balance is 0
+    if (data && IS_DEV && data.balance === 0) {
+      data = { ...data, balance: SANDBOX_TEST_BALANCE };
+      console.log('🧪 Sandbox mode: Using test balance of R', SANDBOX_TEST_BALANCE);
+    }
     setGuardDataState(data);
     try {
       if (data) {
@@ -103,6 +120,33 @@ export function GuardProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateBalance = async (newBalance: number) => {
+    if (!guardData) return;
+
+    const updatedData = { ...guardData, balance: newBalance };
+    // Don't apply sandbox balance here - this is an explicit update
+    setGuardDataState(updatedData);
+    try {
+      await AsyncStorage.setItem(GUARD_STORAGE_KEY, JSON.stringify(updatedData));
+    } catch (error) {
+      console.error('Error saving updated balance:', error);
+    }
+    console.log('Updated guard balance to:', newBalance);
+  };
+
+  const resetSandboxBalance = async () => {
+    if (!guardData) return;
+
+    const updatedData = { ...guardData, balance: SANDBOX_TEST_BALANCE };
+    setGuardDataState(updatedData);
+    try {
+      await AsyncStorage.setItem(GUARD_STORAGE_KEY, JSON.stringify(updatedData));
+      console.log('🧪 Sandbox balance reset to R', SANDBOX_TEST_BALANCE);
+    } catch (error) {
+      console.error('Error resetting sandbox balance:', error);
+    }
+  };
+
   return (
     <GuardContext.Provider
       value={{
@@ -112,6 +156,8 @@ export function GuardProvider({ children }: { children: ReactNode }) {
         isLinked: !!guardData,
         isLoading,
         refreshGuardData,
+        updateBalance,
+        resetSandboxBalance,
       }}
     >
       {children}

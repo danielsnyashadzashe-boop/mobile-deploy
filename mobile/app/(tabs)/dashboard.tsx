@@ -5,11 +5,10 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Modal,
   Alert,
-  TextInput,
   ActivityIndicator,
   Image,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,25 +17,24 @@ import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
-import QRCode from 'react-native-qrcode-svg';
+import { useRouter } from 'expo-router';
 import { formatCurrency } from '../../data/mockData';
 import { TippaLogo } from '../../components/TippaLogo';
 import { useUser } from '@clerk/clerk-expo';
 import { commissionService, CommissionInfo } from '../../services/commissionService';
 import { useGuard } from '../../contexts/GuardContext';
 import { getGuardProfile, getTransactions } from '../../services/mobileApiService';
+import Toast from 'react-native-toast-message';
+
+// @ts-ignore
+const IS_DEV = __DEV__;
 
 export default function DashboardScreen() {
+  const router = useRouter();
   const { user } = useUser();
-  const { guardData, refreshGuardData, isLoading: guardLoading } = useGuard();
+  const { guardData, refreshGuardData, isLoading: guardLoading, resetSandboxBalance } = useGuard();
   const [refreshing, setRefreshing] = useState(false);
-  const [showAirtimeModal, setShowAirtimeModal] = useState(false);
-  const [showElectricityModal, setShowElectricityModal] = useState(false);
   const [downloadingQR, setDownloadingQR] = useState(false);
-  const [airtimeAmount, setAirtimeAmount] = useState('');
-  const [electricityAmount, setElectricityAmount] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [meterNumber, setMeterNumber] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const qrViewRef = useRef(null);
@@ -138,7 +136,7 @@ export default function DashboardScreen() {
       Alert.alert('Error', 'QR code not ready. Please try again.');
       return;
     }
-    
+
     try {
       setDownloadingQR(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -182,15 +180,15 @@ export default function DashboardScreen() {
           mimeType: 'image/png',
           dialogTitle: 'Save QR Code for Printing (300 DPI)',
         });
-        
+
         Alert.alert(
-          'Success!', 
+          'Success!',
           'QR Code ready for download!\n\nOptimized for 300 DPI printing - perfect for high-quality prints.',
           [{ text: 'OK' }]
         );
       } else {
         Alert.alert(
-          'Success!', 
+          'Success!',
           `QR Code saved as:\n${filename}\n\nOptimized for 300 DPI printing`,
           [{ text: 'OK' }]
         );
@@ -213,10 +211,13 @@ export default function DashboardScreen() {
 
     switch (action) {
       case 'airtime':
-        setShowAirtimeModal(true);
+        router.push('/airtime-purchase');
         break;
       case 'electricity':
-        setShowElectricityModal(true);
+        router.push('/electricity-purchase');
+        break;
+      case 'voucher':
+        router.push('/voucher-purchase');
         break;
     }
   };
@@ -238,6 +239,18 @@ export default function DashboardScreen() {
   const maxAmount = Math.max(income, expenses, 1); // Minimum 1 to avoid division by zero
   const incomeWidth = maxAmount > 0 ? (income / maxAmount) * 100 : 0;
   const expenseWidth = maxAmount > 0 ? (expenses / maxAmount) * 100 : 0;
+
+  const handleResetSandboxBalance = async () => {
+    await resetSandboxBalance();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Toast.show({
+      type: 'success',
+      text1: 'Balance Reset',
+      text2: 'Sandbox balance set to R5,000',
+      position: 'top',
+      visibilityTime: 2000,
+    });
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top', 'left', 'right']}>
@@ -439,10 +452,23 @@ export default function DashboardScreen() {
         {/* Balance Card - Moved Down */}
         <View className="px-6 mt-6">
           <View className="bg-white rounded-2xl p-4 shadow-lg">
-            <Text className="text-gray-600 text-sm mb-1">Available Balance</Text>
-            <Text className="text-3xl font-bold text-gray-900">
-              {formatCurrency(guardData?.balance || 0)}
-            </Text>
+            <View className="flex-row justify-between items-start">
+              <View>
+                <Text className="text-gray-600 text-sm mb-1">Available Balance</Text>
+                <Text className="text-3xl font-bold text-gray-900">
+                  {formatCurrency(guardData?.balance || 0)}
+                </Text>
+              </View>
+              {/* Sandbox Reset Button - Only show in development */}
+              {IS_DEV && (
+                <TouchableOpacity
+                  onPress={handleResetSandboxBalance}
+                  className="bg-purple-100 px-3 py-1.5 rounded-lg"
+                >
+                  <Text className="text-purple-700 text-xs font-medium">Reset Balance</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             <View className="flex-row justify-between mt-4">
               <View>
                 <Text className="text-xs text-gray-500">Today's Earnings</Text>
@@ -460,6 +486,19 @@ export default function DashboardScreen() {
         <View className="px-6 mt-6">
           <Text className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</Text>
           <View className="flex-row flex-wrap justify-between">
+            {/* Buy Voucher - Primary Action */}
+            <TouchableOpacity
+              onPress={() => handleQuickAction('voucher')}
+              className="bg-emerald-50 rounded-xl p-4 shadow-sm mb-4 border border-emerald-200"
+              style={{ width: '48%' }}
+            >
+              <View className="bg-emerald-100 w-10 h-10 rounded-full items-center justify-center mb-2">
+                <Ionicons name="ticket-outline" size={20} color="#059669" />
+              </View>
+              <Text className="text-sm font-medium text-gray-900">Buy Voucher</Text>
+              <Text className="text-xs text-gray-500">Cash at stores</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               onPress={() => handleQuickAction('airtime')}
               className="bg-white rounded-xl p-4 shadow-sm mb-4"
@@ -551,171 +590,6 @@ export default function DashboardScreen() {
           </View>
         </View>
       </ScrollView>
-
-      {/* Airtime Modal */}
-      <Modal
-        visible={showAirtimeModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowAirtimeModal(false)}
-      >
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-3xl p-6 pb-10">
-            <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-xl font-bold">Buy Airtime</Text>
-              <TouchableOpacity onPress={() => setShowAirtimeModal(false)}>
-                <Ionicons name="close" size={24} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Phone Number Input */}
-            <Text className="text-sm font-medium text-gray-700 mb-2">Phone Number</Text>
-            <View className="bg-gray-50 rounded-lg px-4 py-3 mb-4">
-              <TextInput
-                value={phoneNumber}
-                onChangeText={setPhoneNumber}
-                placeholder="Enter phone number (e.g., 0812345678)"
-                keyboardType="phone-pad"
-                className="text-base"
-              />
-            </View>
-
-            {/* Amount Input */}
-            <Text className="text-sm font-medium text-gray-700 mb-2">Amount</Text>
-            <View className="flex-row items-center bg-gray-50 rounded-lg px-4 py-3 mb-2">
-              <Text className="text-xl font-bold text-gray-700 mr-2">R</Text>
-              <TextInput
-                value={airtimeAmount}
-                onChangeText={setAirtimeAmount}
-                placeholder="0.00"
-                keyboardType="numeric"
-                className="flex-1 text-xl"
-              />
-            </View>
-            <Text className="text-xs text-gray-500 mb-6">
-              Available balance: {formatCurrency(guardData?.balance || 0)}
-            </Text>
-
-            {/* Quick Amount Buttons */}
-            <Text className="text-sm font-medium text-gray-700 mb-3">Quick Amounts</Text>
-            <View className="flex-row flex-wrap mb-6">
-              {['10', '20', '50', '100', '200'].map((quickAmount) => (
-                <TouchableOpacity
-                  key={quickAmount}
-                  onPress={() => setAirtimeAmount(quickAmount)}
-                  className="px-4 py-2 rounded-lg mr-2 mb-2 bg-gray-100"
-                >
-                  <Text className="text-sm font-medium text-gray-700">
-                    R{quickAmount}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Submit Button */}
-            <TouchableOpacity
-              onPress={() => {
-                Alert.alert('Airtime Purchased Successfully!', 'The airtime voucher will be sent to your registered number.');
-                setShowAirtimeModal(false);
-                setAirtimeAmount('');
-                setPhoneNumber('');
-              }}
-              style={{ backgroundColor: '#5B94D3' }}
-              className="rounded-lg py-4 items-center"
-            >
-              <Text className="text-white font-semibold text-base">Purchase Airtime</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Electricity Modal */}
-      <Modal
-        visible={showElectricityModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowElectricityModal(false)}
-      >
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-3xl p-6 pb-10">
-            <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-xl font-bold">Buy Electricity</Text>
-              <TouchableOpacity onPress={() => setShowElectricityModal(false)}>
-                <Ionicons name="close" size={24} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Meter Number Input */}
-            <Text className="text-sm font-medium text-gray-700 mb-2">Meter Number</Text>
-            <View className="bg-gray-50 rounded-lg px-4 py-3 mb-4">
-              <TextInput
-                value={meterNumber}
-                onChangeText={setMeterNumber}
-                placeholder="Enter meter number (e.g., 12345678901)"
-                keyboardType="numeric"
-                className="text-base"
-              />
-            </View>
-
-            {/* Amount Input */}
-            <Text className="text-sm font-medium text-gray-700 mb-2">Amount</Text>
-            <View className="flex-row items-center bg-gray-50 rounded-lg px-4 py-3 mb-2">
-              <Text className="text-xl font-bold text-gray-700 mr-2">R</Text>
-              <TextInput
-                value={electricityAmount}
-                onChangeText={setElectricityAmount}
-                placeholder="0.00"
-                keyboardType="numeric"
-                className="flex-1 text-xl"
-              />
-            </View>
-            <Text className="text-xs text-gray-500 mb-6">
-              Available balance: {formatCurrency(guardData?.balance || 0)}
-            </Text>
-
-            {/* Quick Amount Buttons */}
-            <Text className="text-sm font-medium text-gray-700 mb-3">Quick Amounts</Text>
-            <View className="flex-row flex-wrap mb-6">
-              {['50', '100', '200', '300', '500'].map((quickAmount) => (
-                <TouchableOpacity
-                  key={quickAmount}
-                  onPress={() => setElectricityAmount(quickAmount)}
-                  className="px-4 py-2 rounded-lg mr-2 mb-2 bg-gray-100"
-                >
-                  <Text className="text-sm font-medium text-gray-700">
-                    R{quickAmount}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Info Note */}
-            <View className="bg-blue-50 rounded-lg p-4 mb-6">
-              <View className="flex-row items-center mb-2">
-                <Ionicons name="information-circle" size={20} color="#3B82F6" />
-                <Text className="text-blue-800 font-medium ml-2">Electricity Purchase</Text>
-              </View>
-              <Text className="text-blue-700 text-sm">
-                You'll receive a prepaid electricity token via SMS after purchase.
-              </Text>
-            </View>
-
-            {/* Submit Button */}
-            <TouchableOpacity
-              onPress={() => {
-                Alert.alert('Electricity Purchased Successfully!', 'The electricity token will be sent to your registered number.');
-                setShowElectricityModal(false);
-                setElectricityAmount('');
-                setMeterNumber('');
-              }}
-              style={{ backgroundColor: '#5B94D3' }}
-              className="rounded-lg py-4 items-center"
-            >
-              <Text className="text-white font-semibold text-base">Purchase Electricity</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       {/* Full Screen QR Code Modal */}
       <Modal

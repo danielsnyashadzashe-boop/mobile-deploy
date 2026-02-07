@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
+import Toast from 'react-native-toast-message';
 import { GuardProvider } from '../contexts/GuardContext';
 import '../global.css';
 
@@ -47,7 +48,29 @@ export default function RootLayout() {
               <Stack.Screen name="index" />
               <Stack.Screen name="(auth)" />
               <Stack.Screen name="(tabs)" />
+              <Stack.Screen
+                name="voucher-purchase"
+                options={{
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                }}
+              />
+              <Stack.Screen
+                name="airtime-purchase"
+                options={{
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                }}
+              />
+              <Stack.Screen
+                name="electricity-purchase"
+                options={{
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                }}
+              />
             </Stack>
+            <Toast />
           </SafeAreaProvider>
         </GuardProvider>
       </ClerkLoaded>

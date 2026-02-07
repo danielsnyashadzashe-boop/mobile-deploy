@@ -53,7 +53,7 @@ interface LinkAccountResponse {
   profileImage: string | null;
 }
 
-interface Transaction {
+export interface Transaction {
   id: string;
   type: string;
   amount: number;
@@ -66,7 +66,7 @@ interface Transaction {
   createdAt: string;
 }
 
-interface Payout {
+export interface Payout {
   id: string;
   voucherNumber: string | null;
   amount: number;
