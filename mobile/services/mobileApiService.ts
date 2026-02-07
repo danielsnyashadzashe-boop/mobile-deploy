@@ -82,6 +82,25 @@ export interface Payout {
   provider: string | null;
 }
 
+// Payout Request interface (for approval workflow)
+export interface PayoutRequest {
+  id: string;
+  payoutId: string;
+  amount: number;
+  status: 'PENDING' | 'APPROVED' | 'PROCESSING' | 'COMPLETED' | 'REJECTED';
+  method?: 'VOUCHER' | 'BANK_TRANSFER';
+  requestedAt: string;
+  approvedAt?: string;
+  processedAt?: string;
+  completedAt?: string;
+  notes?: string;
+  adminNotes?: string;
+  rejectionReason?: string;
+  voucherPin?: string;
+  voucherSerial?: string;
+  voucherExpiry?: string;
+}
+
 /**
  * Step 1: Verify the 6-digit access code
  * Validates code is real, not expired, and guard is active
@@ -298,55 +317,6 @@ export async function updateActivity(clerkUserId: string): Promise<void> {
 }
 
 /**
- * Update guard profile (personal info and banking details)
- * NOTE: Requires backend endpoint PUT /api/mobile/guard/:clerkUserId/profile
- */
-export async function updateGuardProfile(
-  clerkUserId: string,
-  updates: {
-    name?: string;
-    surname?: string;
-    phone?: string;
-    alternatePhone?: string;
-    bankName?: string;
-    accountNumber?: string;
-    accountHolder?: string;
-    branchCode?: string;
-    accountType?: string;
-  }
-): Promise<ApiResponse<GuardData>> {
-  try {
-    console.log('Updating guard profile for:', clerkUserId);
-
-    const response = await fetch(`${API_BASE_URL}/api/mobile/guard/${clerkUserId}/profile`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
-      return {
-        success: false,
-        error: result.error || 'Failed to update profile'
-      };
-    }
-
-    return {
-      success: true,
-      data: transformGuardData(result.data)
-    };
-  } catch (error) {
-    console.error('Error updating guard profile:', error);
-    return {
-      success: false,
-      error: 'Failed to update profile. Please check your connection.'
-    };
-  }
-}
-
-/**
  * Transform API response to GuardData format
  */
 function transformGuardData(data: any): GuardData {
@@ -368,9 +338,220 @@ function transformGuardData(data: any): GuardData {
   };
 }
 
-// ============================================
-// Purchase API Functions
-// ============================================
+// ==================== VOUCHER PURCHASE ====================
+
+interface VoucherData {
+  pin: string;
+  serialNumber: string;
+  expiryDate: string;
+  amount: number;
+  transactionId: string;
+  reference: string;
+}
+
+interface PayoutResult {
+  method: 'VOUCHER' | 'BANK_TRANSFER';
+  amount: number;
+  previousBalance: number;
+  newBalance: number;
+  payoutId: string;
+  voucher?: VoucherData;
+  guard: {
+    guardId: string;
+    name: string;
+  };
+}
+
+/**
+ * Purchase a 1Voucher using guard's balance
+ * @param guardId - The guard's guardId (e.g., "GRD1234567ABC")
+ * @param amount - Amount in Rands (R1 - R4,000)
+ * @param notes - Optional notes for the transaction
+ */
+export async function purchaseVoucher(
+  guardId: string,
+  amount: number,
+  notes?: string
+): Promise<ApiResponse<PayoutResult>> {
+  try {
+    console.log('Purchasing voucher:', { guardId, amount });
+
+    const response = await fetch(`${API_BASE_URL}/api/payouts/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        guardId,
+        amount,
+        method: 'VOUCHER',
+        notes: notes || 'Mobile app voucher purchase',
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to purchase voucher',
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error purchasing voucher:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.',
+    };
+  }
+}
+
+/**
+ * Request a bank transfer payout
+ * @param guardId - The guard's guardId
+ * @param amount - Amount in Rands (minimum R50)
+ * @param notes - Optional notes
+ */
+export async function requestBankTransfer(
+  guardId: string,
+  amount: number,
+  notes?: string
+): Promise<ApiResponse<PayoutResult>> {
+  try {
+    console.log('Requesting bank transfer:', { guardId, amount });
+
+    const response = await fetch(`${API_BASE_URL}/api/payouts/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        guardId,
+        amount,
+        method: 'BANK_TRANSFER',
+        notes: notes || 'Mobile app bank transfer request',
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to request bank transfer',
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error requesting bank transfer:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.',
+    };
+  }
+}
+
+// ==================== PAYOUT REQUESTS (Approval Workflow) ====================
+
+interface PayoutRequestResult {
+  payoutId: string;
+  amount: number;
+  status: 'PENDING';
+  requestedAt: string;
+  currentBalance: number;
+  note: string;
+}
+
+/**
+ * Request a payout (goes through admin approval workflow)
+ * Use this for bank transfers that require admin approval
+ * @param guardId - The guard's guardId (e.g., "GRD1234567ABC")
+ * @param amount - Amount in Rands (minimum R1)
+ * @param notes - Optional notes for the admin
+ */
+export async function requestPayout(
+  guardId: string,
+  amount: number,
+  notes?: string
+): Promise<ApiResponse<PayoutRequestResult>> {
+  try {
+    console.log('Requesting payout:', { guardId, amount });
+    console.log('API URL:', `${API_BASE_URL}/api/mobile/payout/request`);
+
+    const response = await fetch(`${API_BASE_URL}/api/mobile/payout/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        guardId,
+        amount,
+        notes: notes || '',
+      }),
+    });
+
+    console.log('Response status:', response.status, response.ok);
+    const result = await response.json();
+    console.log('Response body:', JSON.stringify(result, null, 2));
+
+    if (!response.ok || !result.success) {
+      console.log('Request failed:', result.error);
+      return {
+        success: false,
+        error: result.error || 'Failed to submit payout request',
+      };
+    }
+
+    console.log('Request successful, returning result');
+    return result;
+  } catch (error) {
+    console.error('Error requesting payout:', error);
+    return {
+      success: false,
+      error: 'Something went wrong. Please check your connection and try again.',
+    };
+  }
+}
+
+/**
+ * Get guard's payout requests (for tracking approval status)
+ * @param guardId - The guard's guardId
+ * @param status - Optional filter by status
+ */
+export async function getPayoutRequests(
+  guardId: string,
+  status?: 'PENDING' | 'APPROVED' | 'PROCESSING' | 'COMPLETED' | 'REJECTED'
+): Promise<ApiResponse<PayoutRequest[]>> {
+  try {
+    let url = `${API_BASE_URL}/api/mobile/payout/requests?guardId=${guardId}`;
+    if (status) url += `&status=${status}`;
+
+    const response = await fetch(url);
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to fetch payout requests',
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Error fetching payout requests:', error);
+    return {
+      success: false,
+      error: 'Failed to fetch payout requests',
+    };
+  }
+}
+
+// ==================== PURCHASE API FUNCTIONS (Services Tab) ====================
+
+// Network product codes for airtime purchases
+export const NETWORK_CODES = {
+  MTN: '304',
+  VODACOM: '305',
+  CELL_C: '306',
+  TELKOM: '307',
+} as const;
 
 interface AirtimePurchaseRequest {
   clerkUserId: string;
@@ -402,53 +583,6 @@ interface ElectricityPurchaseResponse {
   newBalance: number;
   customerName: string;
 }
-
-interface VoucherPurchaseRequest {
-  clerkUserId: string;
-  amount: number;
-}
-
-interface VoucherPurchaseResponse {
-  message: string;
-  amount: number;
-  voucherPin: string;
-  voucherSerial: string;
-  expiryDate: string;
-  previousBalance: number;
-  newBalance: number;
-}
-
-interface PayoutRequestData {
-  guardId: string;
-  amount: number;
-  notes?: string;
-}
-
-interface PayoutRequestResponse {
-  payoutId: string;
-  amount: number;
-  status: string;
-  note: string;
-}
-
-interface PayoutHistoryItem {
-  id: string;
-  amount: number;
-  status: 'PENDING' | 'APPROVED' | 'COMPLETED' | 'REJECTED';
-  requestDate: string;
-  processDate: string | null;
-  notes: string | null;
-  rejectionReason: string | null;
-  voucherPin: string | null;
-}
-
-// Network product codes
-export const NETWORK_CODES = {
-  MTN: '304',
-  VODACOM: '305',
-  CELL_C: '306',
-  TELKOM: '307',
-} as const;
 
 /**
  * Purchase airtime for a phone number
@@ -518,102 +652,7 @@ export async function purchaseElectricity(
   }
 }
 
-/**
- * Purchase a cash voucher
- */
-export async function purchaseVoucher(
-  params: VoucherPurchaseRequest
-): Promise<ApiResponse<VoucherPurchaseResponse>> {
-  try {
-    console.log('Purchasing voucher:', params);
-
-    const response = await fetch(`${API_BASE_URL}/api/mobile/purchase/voucher`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
-      return {
-        success: false,
-        error: result.error || 'Failed to purchase voucher'
-      };
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Error purchasing voucher:', error);
-    return {
-      success: false,
-      error: 'Something went wrong. Please check your connection and try again.'
-    };
-  }
-}
-
-/**
- * Request a payout (admin approval flow)
- */
-export async function requestPayout(
-  params: PayoutRequestData
-): Promise<ApiResponse<PayoutRequestResponse>> {
-  try {
-    console.log('Requesting payout:', params);
-
-    const response = await fetch(`${API_BASE_URL}/api/mobile/payout/request`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
-      return {
-        success: false,
-        error: result.error || 'Failed to submit payout request'
-      };
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Error requesting payout:', error);
-    return {
-      success: false,
-      error: 'Something went wrong. Please check your connection and try again.'
-    };
-  }
-}
-
-/**
- * Get payout request history for a guard
- */
-export async function getPayoutRequests(
-  guardId: string
-): Promise<ApiResponse<PayoutHistoryItem[]>> {
-  try {
-    console.log('Getting payout requests for guard:', guardId);
-
-    const response = await fetch(`${API_BASE_URL}/api/mobile/payout/requests?guardId=${guardId}`);
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
-      return {
-        success: false,
-        error: result.error || 'Failed to fetch payout requests'
-      };
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Error fetching payout requests:', error);
-    return {
-      success: false,
-      error: 'Failed to fetch payout requests'
-    };
-  }
-}
+export type { VoucherData, PayoutResult };
 
 export default {
   verifyAccessCode,
@@ -623,10 +662,10 @@ export default {
   getTransactions,
   getPayouts,
   updateActivity,
-  updateGuardProfile,
+  purchaseVoucher,
   purchaseAirtime,
   purchaseElectricity,
-  purchaseVoucher,
+  requestBankTransfer,
   requestPayout,
   getPayoutRequests,
   NETWORK_CODES,

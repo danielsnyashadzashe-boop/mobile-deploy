@@ -47,7 +47,7 @@ const services = [
 
 export default function ServicesScreen() {
   const { user } = useUser();
-  const { guard, refreshGuard } = useGuard();
+  const { guardData, refreshGuardData } = useGuard();
   const [activeModal, setActiveModal] = useState<ServiceType>(null);
 
   const handleServicePress = (serviceId: ServiceType) => {
@@ -61,7 +61,7 @@ export default function ServicesScreen() {
   const handlePurchaseSuccess = (newBalance: number) => {
     // Refresh guard data to update balance
     if (user?.id) {
-      refreshGuard();
+      refreshGuardData(user.id);
     }
     setActiveModal(null);
   };
@@ -105,7 +105,7 @@ export default function ServicesScreen() {
           <View style={styles.balanceContent}>
             <Text style={styles.balanceLabel}>Available Balance</Text>
             <Text style={styles.balanceAmount}>
-              {formatCurrency(guard?.balance || 0)}
+              {formatCurrency(guardData?.balance || 0)}
             </Text>
           </View>
           <Ionicons name="wallet" size={32} color="#5B94D3" />
@@ -146,7 +146,7 @@ export default function ServicesScreen() {
         visible={activeModal === 'airtime'}
         onClose={handleCloseModal}
         onSuccess={handlePurchaseSuccess}
-        balance={guard?.balance || 0}
+        balance={guardData?.balance || 0}
         clerkUserId={user?.id || ''}
       />
 
@@ -154,7 +154,7 @@ export default function ServicesScreen() {
         visible={activeModal === 'electricity'}
         onClose={handleCloseModal}
         onSuccess={handlePurchaseSuccess}
-        balance={guard?.balance || 0}
+        balance={guardData?.balance || 0}
         clerkUserId={user?.id || ''}
       />
 
@@ -162,7 +162,7 @@ export default function ServicesScreen() {
         visible={activeModal === 'voucher'}
         onClose={handleCloseModal}
         onSuccess={handlePurchaseSuccess}
-        balance={guard?.balance || 0}
+        balance={guardData?.balance || 0}
         clerkUserId={user?.id || ''}
       />
     </SafeAreaView>

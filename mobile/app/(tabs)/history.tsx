@@ -298,7 +298,9 @@ export default function HistoryScreen() {
           <View className="items-center bg-green-50 rounded-lg px-3 py-2 flex-1 mr-2">
             <View className="flex-row items-center mb-1">
               <Text className="text-xs text-green-600 font-medium">Income</Text>
-              <Ionicons name="information-circle-outline" size={12} color="#059669" className="ml-1" />
+              <View style={{ marginLeft: 4 }}>
+                <Ionicons name="information-circle-outline" size={12} color="#059669" />
+              </View>
             </View>
             <Text className="text-lg font-bold text-green-600">{formatCurrency(income)}</Text>
           </View>
@@ -306,7 +308,9 @@ export default function HistoryScreen() {
           <View className="items-center bg-red-50 rounded-lg px-3 py-2 flex-1 mx-1">
             <View className="flex-row items-center mb-1">
               <Text className="text-xs text-red-600 font-medium">Expenses</Text>
-              <Ionicons name="information-circle-outline" size={12} color="#DC2626" className="ml-1" />
+              <View style={{ marginLeft: 4 }}>
+                <Ionicons name="information-circle-outline" size={12} color="#DC2626" />
+              </View>
             </View>
             <Text className="text-lg font-bold text-red-600">{formatCurrency(expenses)}</Text>
           </View>
@@ -314,7 +318,9 @@ export default function HistoryScreen() {
           <View className="items-center bg-gray-50 rounded-lg px-3 py-2 flex-1 ml-2">
             <View className="flex-row items-center mb-1">
               <Text className="text-xs text-gray-600 font-medium">Net</Text>
-              <Ionicons name={netAmount >= 0 ? "trending-up-outline" : "trending-down-outline"} size={12} color="#6B7280" className="ml-1" />
+              <View style={{ marginLeft: 4 }}>
+                <Ionicons name={netAmount >= 0 ? "trending-up-outline" : "trending-down-outline"} size={12} color="#6B7280" />
+              </View>
             </View>
             <Text
               className="text-lg font-bold"
