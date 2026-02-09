@@ -9,7 +9,6 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSignUp, useAuth } from '@clerk/clerk-expo';
@@ -18,6 +17,9 @@ import { Link, useRouter } from 'expo-router';
 import { signUpSchema, verificationCodeSchema } from '../../src/utils/validation';
 import { getFriendlyErrorMessage } from '../../src/utils/clerkErrorHandler';
 import { TippaLogo } from '../../components/TippaLogo';
+import { AlertModal } from '../../components/AlertModal';
+
+type AlertType = 'error' | 'success' | 'info' | 'warning';
 
 export default function SignUpScreen() {
   const { isLoaded, signUp, setActive } = useSignUp();
@@ -33,6 +35,13 @@ export default function SignUpScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [modal, setModal] = useState<{ visible: boolean; type: AlertType; title: string; message: string }>({
+    visible: false, type: 'error', title: '', message: '',
+  });
+
+  const showModal = (type: AlertType, title: string, message: string) => {
+    setModal({ visible: true, type, title, message });
+  };
 
   // Redirect if already signed in
   useEffect(() => {
@@ -45,7 +54,6 @@ export default function SignUpScreen() {
     if (!isLoaded) return;
 
     setError('');
-    console.log('Sign up button pressed');
 
     // Validate inputs with Zod
     const validation = signUpSchema.safeParse({
@@ -58,16 +66,14 @@ export default function SignUpScreen() {
 
     if (!validation.success) {
       const firstError = validation.error.errors[0];
-      console.log('Validation error:', firstError.message);
       setError(firstError.message);
-      Alert.alert('Validation Error', firstError.message);
+      showModal('warning', 'Validation Error', firstError.message);
       return;
     }
 
     setLoading(true);
 
     try {
-      console.log('Creating sign up...');
       const result = await signUp.create({
         emailAddress,
         password,
@@ -75,8 +81,6 @@ export default function SignUpScreen() {
         lastName,
         username,
       });
-
-      console.log('Sign up result:', result.status);
 
       // Check if sign up is complete (no verification needed)
       if (result.status === 'complete') {
@@ -91,13 +95,12 @@ export default function SignUpScreen() {
         await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
         setPendingVerification(true);
         setError('');
-        Alert.alert('Check Your Email', 'We sent you a 6-digit verification code. Please enter it below.');
+        showModal('info', 'Check Your Email', 'We sent you a 6-digit verification code. Please enter it below.');
       }
     } catch (err: any) {
-      console.error('Sign up error:', JSON.stringify(err, null, 2));
       const errorMessage = getFriendlyErrorMessage(err);
       setError(errorMessage);
-      Alert.alert('Sign Up Failed', errorMessage);
+      showModal('error', 'Sign Up Failed', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -107,31 +110,23 @@ export default function SignUpScreen() {
     if (!isLoaded) return;
 
     setError('');
-    console.log('Verify button pressed');
 
     // Validate code with Zod
     const validation = verificationCodeSchema.safeParse({ code });
 
     if (!validation.success) {
       const firstError = validation.error.errors[0];
-      console.log('Validation error:', firstError.message);
       setError(firstError.message);
-      Alert.alert('Invalid Code', firstError.message);
+      showModal('warning', 'Invalid Code', firstError.message);
       return;
     }
 
     setLoading(true);
 
     try {
-      console.log('Verifying code...');
       const completeSignUp = await signUp.attemptEmailAddressVerification({
         code,
       });
-
-      console.log('Sign up status after verification:', completeSignUp.status);
-      console.log('Missing fields:', completeSignUp.missingFields);
-      console.log('Unverified fields:', completeSignUp.unverifiedFields);
-      console.log('Created session ID:', completeSignUp.createdSessionId);
 
       // If status is complete, create session
       if (completeSignUp.status === 'complete' && completeSignUp.createdSessionId) {
@@ -143,8 +138,6 @@ export default function SignUpScreen() {
 
       // If verification succeeded but status is still missing_requirements
       if (completeSignUp.status === 'missing_requirements') {
-        console.log('Missing requirements after verification:', completeSignUp.missingFields);
-
         // Check if there's a session we can activate
         if (completeSignUp.createdSessionId) {
           await setActive({ session: completeSignUp.createdSessionId });
@@ -157,19 +150,16 @@ export default function SignUpScreen() {
         const missing = completeSignUp.missingFields || [];
         const errorMsg = `Please complete: ${missing.join(', ')}. Contact support if this persists.`;
         setError(errorMsg);
-        Alert.alert('Additional Information Required', errorMsg);
+        showModal('warning', 'Additional Information Required', errorMsg);
         return;
       }
 
       // Fallback error
-      console.error('Unexpected sign up state:', JSON.stringify(completeSignUp, null, 2));
       const errorMsg = 'Unable to complete sign up. Please try again or contact support.';
       setError(errorMsg);
-      Alert.alert('Error', errorMsg);
+      showModal('error', 'Error', errorMsg);
 
     } catch (err: any) {
-      console.error('Verification error:', JSON.stringify(err, null, 2));
-
       // Handle already verified case
       if (err.errors?.[0]?.code === 'verification_already_verified') {
         try {
@@ -182,11 +172,10 @@ export default function SignUpScreen() {
             return;
           }
 
-          Alert.alert('Already Verified', 'Your account is already verified. Please sign in.');
+          showModal('info', 'Already Verified', 'Your account is already verified. Please sign in.');
           router.push('/(auth)/sign-in');
         } catch (reloadErr) {
-          console.error('Reload error:', reloadErr);
-          Alert.alert('Account Exists', 'Please try signing in with your credentials.');
+          showModal('info', 'Account Exists', 'Please try signing in with your credentials.');
           router.push('/(auth)/sign-in');
         }
         return;
@@ -195,7 +184,7 @@ export default function SignUpScreen() {
       // Show friendly error message
       const errorMessage = getFriendlyErrorMessage(err);
       setError(errorMessage);
-      Alert.alert('Verification Failed', errorMessage);
+      showModal('error', 'Verification Failed', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -365,6 +354,14 @@ export default function SignUpScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <AlertModal
+        visible={modal.visible}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onClose={() => setModal(prev => ({ ...prev, visible: false }))}
+      />
     </KeyboardAvoidingView>
   );
 }
