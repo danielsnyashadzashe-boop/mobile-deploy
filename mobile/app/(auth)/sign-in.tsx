@@ -9,7 +9,6 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSignIn, useAuth } from '@clerk/clerk-expo';
@@ -18,6 +17,9 @@ import { Link, useRouter } from 'expo-router';
 import { signInSchema } from '../../src/utils/validation';
 import { getFriendlyErrorMessage } from '../../src/utils/clerkErrorHandler';
 import { TippaLogo } from '../../components/TippaLogo';
+import { AlertModal } from '../../components/AlertModal';
+
+type AlertType = 'error' | 'success' | 'info' | 'warning';
 
 export default function SignInScreen() {
   const { isLoaded, signIn, setActive } = useSignIn();
@@ -28,6 +30,13 @@ export default function SignInScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [modal, setModal] = useState<{ visible: boolean; type: AlertType; title: string; message: string }>({
+    visible: false, type: 'error', title: '', message: '',
+  });
+
+  const showModal = (type: AlertType, title: string, message: string) => {
+    setModal({ visible: true, type, title, message });
+  };
 
   // Redirect if already signed in
   useEffect(() => {
@@ -51,10 +60,8 @@ export default function SignInScreen() {
       }
 
       // If API call fails, allow access to app
-      console.warn('Registration check failed, allowing access');
       return { canAccessApp: true };
     } catch (error) {
-      console.error('Error checking registration:', error);
       // On error, allow access to app
       return { canAccessApp: true };
     }
@@ -64,7 +71,6 @@ export default function SignInScreen() {
     if (!isLoaded) return;
 
     setError('');
-    console.log('Sign in button pressed');
 
     // Validate inputs with Zod
     const validation = signInSchema.safeParse({
@@ -74,22 +80,18 @@ export default function SignInScreen() {
 
     if (!validation.success) {
       const firstError = validation.error.errors[0];
-      console.log('Validation error:', firstError.message);
       setError(firstError.message);
-      Alert.alert('Validation Error', firstError.message);
+      showModal('warning', 'Validation Error', firstError.message);
       return;
     }
 
     setLoading(true);
 
     try {
-      console.log('Attempting sign in...');
       const completeSignIn = await signIn.create({
         identifier: emailAddress,
         password,
       });
-
-      console.log('Sign in status:', completeSignIn.status);
 
       // If sign-in is complete, activate session and go to app
       if (completeSignIn.status === 'complete') {
@@ -100,18 +102,15 @@ export default function SignInScreen() {
       }
 
       // Handle unexpected status
-      console.error('Unexpected sign-in state:', JSON.stringify(completeSignIn, null, 2));
       const errorMsg = 'Unable to complete sign in. Please try again.';
       setError(errorMsg);
-      Alert.alert('Error', errorMsg);
+      showModal('error', 'Error', errorMsg);
 
     } catch (err: any) {
-      console.error('Sign in error:', JSON.stringify(err, null, 2));
-
       // Show friendly error message
       const errorMessage = getFriendlyErrorMessage(err);
       setError(errorMessage);
-      Alert.alert('Sign In Failed', errorMessage);
+      showModal('error', 'Sign In Failed', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -204,6 +203,14 @@ export default function SignInScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <AlertModal
+        visible={modal.visible}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onClose={() => setModal(prev => ({ ...prev, visible: false }))}
+      />
     </KeyboardAvoidingView>
   );
 }
