@@ -334,6 +334,21 @@ router.get('/mobile/guard/:clerkUserId', async (req: Request, res: Response) => 
       })
     }
 
+    // Manually fetch supervising manager to avoid circular reference issues
+    let supervisingManagerData = null
+    if (guard.supervisingManagerId) {
+      supervisingManagerData = await prisma.carGuard.findUnique({
+        where: { id: guard.supervisingManagerId },
+        select: {
+          id: true,
+          guardId: true,
+          name: true,
+          surname: true,
+          phone: true
+        }
+      })
+    }
+
     return res.json({
       success: true,
       data: {
@@ -349,10 +364,24 @@ router.get('/mobile/guard/:clerkUserId', async (req: Request, res: Response) => 
         qrCodeUrl: guard.qrCodeUrl,
         status: guard.status,
         rating: guard.rating || 0,
+        isManager: guard.isManager || false,
+        locationAssignedAt: guard.locationAssignedAt,
+        managerAssignedAt: guard.managerAssignedAt,
         location: guard.location ? {
           id: guard.location.id,
+          locationId: guard.location.locationId,
           name: guard.location.name,
-          address: guard.location.address
+          address: guard.location.address,
+          city: guard.location.city,
+          province: guard.location.province,
+          operatingHours: guard.location.operatingHours
+        } : null,
+        manager: supervisingManagerData ? {
+          id: supervisingManagerData.id,
+          guardId: supervisingManagerData.guardId,
+          name: `${supervisingManagerData.name} ${supervisingManagerData.surname}`,
+          phone: supervisingManagerData.phone,
+          email: null
         } : null
       }
     })

@@ -325,6 +325,17 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
           </TouchableOpacity>
 
+          <TouchableOpacity
+            onPress={() => router.push('/assignment-history')}
+            className="flex-row justify-between items-center py-3 border-b border-gray-100"
+          >
+            <View className="flex-row items-center">
+              <Ionicons name="time-outline" size={20} color="#6B7280" />
+              <Text className="ml-3 text-gray-700">Assignment History</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
+
           <TouchableOpacity className="flex-row justify-between items-center py-3 border-b border-gray-100">
             <View className="flex-row items-center">
               <Ionicons name="help-circle-outline" size={20} color="#6B7280" />
