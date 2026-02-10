@@ -1,8 +1,11 @@
 import { Tabs } from 'expo-router';
 import { View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useGuard } from '../../contexts/GuardContext';
 
 export default function TabLayout() {
+  const { guardData } = useGuard();
+
   return (
     <Tabs
       screenOptions={{
@@ -44,6 +47,16 @@ export default function TabLayout() {
           title: 'History',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'time' : 'time-outline'} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="team"
+        options={{
+          title: 'Team',
+          href: guardData?.isManager ? undefined : null, // Only show for managers
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'people' : 'people-outline'} size={24} color={color} />
           ),
         }}
       />
