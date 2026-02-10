@@ -99,8 +99,9 @@ export default function SignUpScreen() {
       }
     } catch (err: any) {
       const errorMessage = getFriendlyErrorMessage(err);
+      const fullMessage = `${errorMessage}\n\nEmail: ${emailAddress}`;
       setError(errorMessage);
-      showModal('error', 'Sign Up Failed', errorMessage);
+      showModal('error', 'Sign Up Failed', fullMessage);
     } finally {
       setLoading(false);
     }
@@ -183,8 +184,9 @@ export default function SignUpScreen() {
 
       // Show friendly error message
       const errorMessage = getFriendlyErrorMessage(err);
+      const fullMessage = `${errorMessage}\n\nEmail: ${emailAddress}`;
       setError(errorMessage);
-      showModal('error', 'Verification Failed', errorMessage);
+      showModal('error', 'Verification Failed', fullMessage);
     } finally {
       setLoading(false);
     }

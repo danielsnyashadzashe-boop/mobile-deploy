@@ -48,6 +48,8 @@ export default function SignInScreen() {
   const checkRegistrationStatus = async (userId: string) => {
     try {
       const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+      console.log('🔍 API URL being used:', apiUrl);
+      console.log('🔍 Full URL:', `${apiUrl}/api/registration/check`);
       const response = await fetch(`${apiUrl}/api/registration/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -93,6 +95,9 @@ export default function SignInScreen() {
         password,
       });
 
+      console.log('✅ Sign in response status:', completeSignIn.status);
+      console.log('✅ Created session ID:', completeSignIn.createdSessionId);
+
       // If sign-in is complete, activate session and go to app
       if (completeSignIn.status === 'complete') {
         await setActive({ session: completeSignIn.createdSessionId });
@@ -101,16 +106,28 @@ export default function SignInScreen() {
         return;
       }
 
+      // Handle 2FA requirement
+      if (completeSignIn.status === 'needs_second_factor') {
+        const errorMsg = 'Your account has Two-Factor Authentication enabled. Please disable 2FA in your Clerk Dashboard settings to continue, or contact support for assistance.';
+        setError(errorMsg);
+        showModal('warning', '2FA Not Supported', errorMsg);
+        return;
+      }
+
       // Handle unexpected status
-      const errorMsg = 'Unable to complete sign in. Please try again.';
+      console.error('❌ Unexpected sign-in status:', completeSignIn.status);
+      const errorMsg = `Unable to complete sign in. Status: ${completeSignIn.status}. Please try again.`;
       setError(errorMsg);
       showModal('error', 'Error', errorMsg);
 
     } catch (err: any) {
       // Show friendly error message
+      console.log('🔴 Sign in error:', err);
+      console.log('🔴 Error details:', JSON.stringify(err, null, 2));
       const errorMessage = getFriendlyErrorMessage(err);
+      const fullMessage = `${errorMessage}\n\nEmail: ${emailAddress}`;
       setError(errorMessage);
-      showModal('error', 'Sign In Failed', errorMessage);
+      showModal('error', 'Sign In Failed', fullMessage);
     } finally {
       setLoading(false);
     }

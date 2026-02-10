@@ -18,6 +18,9 @@ model User {
   username          String?          @unique
   password          String
   role              UserRole
+  clerkUserId       String?          @unique  // Clerk user ID for auth sync
+  firstName         String?
+  lastName          String?
   isActive          Boolean          @default(true)
   isVerified        Boolean          @default(false)
   emailVerified     Boolean          @default(false)
