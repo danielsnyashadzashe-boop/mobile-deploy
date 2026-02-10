@@ -11,12 +11,13 @@ import tipsRoutes from './routes/tips'
 import mobileRoutes from './routes/mobile'
 import payoutsRoutes from './routes/payouts'
 import flashRoutes from './routes/flash'
+import clerkWebhookRoutes from './routes/clerk-webhook'
 
 // Load environment variables
 dotenv.config()
 
 const app: Express = express()
-const PORT = process.env.PORT || 3001
+const PORT = parseInt(process.env.PORT || '3001', 10)
 
 // Middleware
 app.use(cors({
@@ -44,6 +45,7 @@ app.use('/api', tipsRoutes)
 app.use('/api', mobileRoutes) // Mobile app endpoints
 app.use('/api', payoutsRoutes) // 1Voucher and payout endpoints
 app.use('/api', flashRoutes) // Flash API endpoints (airtime, electricity)
+app.use('/api/webhooks', clerkWebhookRoutes) // Clerk webhooks for user sync
 
 // 404 handler
 app.use((req: Request, res: Response) => {
@@ -60,11 +62,12 @@ app.use((err: Error, req: Request, res: Response, next: any) => {
 })
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`)
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`)
   console.log(`📊 Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`)
   console.log(`☁️  Cloudinary: ${process.env.CLOUDINARY_CLOUD_NAME ? 'Configured' : 'Not configured'}`)
+  console.log(`📱 Mobile: Android emulator can connect via http://10.0.2.2:${PORT}`)
 })
 
 export default app

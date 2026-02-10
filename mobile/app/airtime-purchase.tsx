@@ -179,9 +179,9 @@ export default function AirtimePurchaseScreen() {
     <SafeAreaView className="flex-1 bg-gray-50">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1"
+        style={{ flex: 1 }}
       >
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
           {/* Header */}
           <View className="flex-row items-center justify-between px-4 py-3">
             <TouchableOpacity onPress={() => router.back()} className="p-2">
@@ -315,31 +315,44 @@ export default function AirtimePurchaseScreen() {
             Min R{MIN_AMOUNT} - Max R{MAX_AMOUNT}
           </Text>
 
-          {/* Purchase Button */}
-          <Pressable
-            style={({ pressed }) => ({
+          {/* Spacer for bottom button */}
+          <View style={{ height: 80 }} />
+        </ScrollView>
+
+        {/* Fixed Purchase Button at Bottom */}
+        <View style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          backgroundColor: '#F8F9FA',
+          paddingHorizontal: 16,
+          paddingBottom: 16,
+          paddingTop: 12,
+          borderTopWidth: 1,
+          borderTopColor: '#E5E7EB',
+        }}>
+          <TouchableOpacity
+            style={{
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
-              marginHorizontal: 16,
-              marginTop: 24,
-              marginBottom: 24,
               paddingVertical: 16,
               borderRadius: 12,
               backgroundColor: canPurchase() ? '#2563EB' : '#9CA3AF',
-              opacity: pressed ? 0.7 : 1,
-            })}
+            }}
             onPress={() => {
               console.log('🟢 Button pressed!');
               handlePurchase();
             }}
+            disabled={!canPurchase()}
           >
             <Ionicons name="phone-portrait-outline" size={20} color="#fff" />
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600', marginLeft: 8 }}>
               Buy R{getEffectiveAmount()} Airtime
             </Text>
-          </Pressable>
-        </ScrollView>
+          </TouchableOpacity>
+        </View>
       </KeyboardAvoidingView>
 
       {/* Confirmation Modal */}
