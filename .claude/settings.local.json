@@ -13,7 +13,11 @@
       "Bash(npx tsc:*)",
       "Bash(timeout 2 npm run dev:*)",
       "Bash(npx ts-node:*)",
-      "Bash(npx prisma generate:*)"
+      "Bash(npx prisma generate:*)",
+      "Bash(npm run dev:*)",
+      "Bash(ls:*)",
+      "Bash(ipconfig:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []

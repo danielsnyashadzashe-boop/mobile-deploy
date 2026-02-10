@@ -96,6 +96,12 @@ model CarGuard {
   managerId         String?          @db.ObjectId
   zoneId            String?          @db.ObjectId
 
+  // Guard-as-Manager fields (self-referential for guard managing other guards)
+  isManager         Boolean          @default(false)
+  supervisingManagerId String?       @db.ObjectId  // References another CarGuard who is this guard's supervisor
+  locationAssignedAt   DateTime?
+  managerAssignedAt    DateTime?
+
   status            GuardStatus      @default(PENDING)
   verificationLevel VerificationLevel @default(BASIC)
   rating            Float            @default(0)
@@ -128,16 +134,26 @@ model CarGuard {
 
   user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   location          Location         @relation(fields: [locationId], references: [id])
-  manager           Manager?         @relation(fields: [managerId], references: [id])
+  // Note: manager relation removed to avoid circular reference
+  // managerId field kept for manual queries: Manager.findUnique({ where: { id: managerId } })
   zone              Zone?            @relation(fields: [zoneId], references: [id])
-  tipsReceived      Tip[]
-  payouts           Payout[]
-  transactions      Transaction[]
-  documents         GuardDocument[]
-  reviews           Review[]
-  shifts            Shift[]
-  incidents         Incident[]
-  commissions       Commission[]
+
+  // Self-referential relation for guard-as-manager functionality
+  // Note: Removed inverse relation (supervisedGuards) to avoid TypeScript circular reference issues
+  // To get supervised guards, query: CarGuard.findMany({ where: { supervisingManagerId: managerId } })
+
+  // Note: All inverse relations removed to avoid TypeScript circular reference issues
+  // Query tips manually: Tip.findMany({ where: { guardId } })
+  // Query payouts manually: Payout.findMany({ where: { guardId } })
+  // Query transactions manually: Transaction.findMany({ where: { guardId } })
+  // Query documents manually: GuardDocument.findMany({ where: { guardId } })
+  // Query reviews manually: Review.findMany({ where: { guardId } })
+  // Query shifts manually: Shift.findMany({ where: { guardId } })
+  // Query incidents manually: Incident.findMany({ where: { guardId } })
+  // Query commissions manually: Commission.findMany({ where: { guardId } })
+  // Query location history manually: LocationHistory.findMany({ where: { guardId } })
+  // Query manager history: ManagerHistory.findMany({ where: { guardId } })
+  // Query managed guards history: ManagerHistory.findMany({ where: { managerId } })
 }
 
 enum GuardStatus {
@@ -215,6 +231,7 @@ model Location {
   registrations     Registration[]
   incidents         Incident[]
   announcements     Announcement[]
+  locationHistory   LocationHistory[]
 }
 
 enum LocationType {
@@ -422,7 +439,8 @@ model GuardDocument {
   documentId        String           @unique @db.ObjectId
   isPrimary         Boolean          @default(false)
 
-  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  // Note: guard relation removed to avoid circular reference
+  // guardId field kept for manual queries
   document          Document         @relation(fields: [documentId], references: [id])
 }
 
@@ -514,7 +532,8 @@ model Manager {
 
   user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   location          Location         @relation(fields: [locationId], references: [id])
-  guards            CarGuard[]
+  // Note: guards relation removed to avoid circular reference with CarGuard
+  // Query guards manually: CarGuard.findMany({ where: { managerId } })
   registrations     Registration[]
   zones             ManagerZone[]
 }
@@ -546,7 +565,8 @@ model Tip {
   amount            Float
   createdAt         DateTime         @default(now())
 
-  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  // Note: guard relation removed to avoid circular reference
+  // guardId field kept for manual queries
   customer          Customer         @relation(fields: [customerId], references: [id])
   location          Location         @relation(fields: [locationId], references: [id])
 }
@@ -578,7 +598,8 @@ model Payout {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
-  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  // Note: guard relation removed to avoid circular reference
+  // guardId field kept for manual queries
 }
 
 enum PayoutStatus {
@@ -601,7 +622,8 @@ model Transaction {
   amount            Float
   createdAt         DateTime         @default(now())
 
-  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  // Note: guard relation removed to avoid circular reference
+  // guardId field kept for manual queries
 }
 
 model Review {
@@ -611,7 +633,8 @@ model Review {
   comment           String?
   createdAt         DateTime         @default(now())
 
-  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  // Note: guard relation removed to avoid circular reference
+  // guardId field kept for manual queries
 }
 
 model Shift {
@@ -622,7 +645,8 @@ model Shift {
   endTime           DateTime?
   createdAt         DateTime         @default(now())
 
-  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  // Note: guard relation removed to avoid circular reference
+  // guardId field kept for manual queries
   zone              Zone             @relation(fields: [zoneId], references: [id])
 }
 
@@ -633,7 +657,8 @@ model Incident {
   description       String
   createdAt         DateTime         @default(now())
 
-  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  // Note: guard relation removed to avoid circular reference
+  // guardId field kept for manual queries
   location          Location         @relation(fields: [locationId], references: [id])
 }
 
@@ -648,7 +673,8 @@ model Commission {
   type              String           @default("TIP")
   createdAt         DateTime         @default(now())
 
-  guard             CarGuard         @relation(fields: [guardId], references: [id])
+  // Note: guard relation removed to avoid circular reference
+  // guardId field kept for manual queries
 }
 
 model CommissionSetting {
@@ -700,4 +726,39 @@ model Announcement {
   createdAt         DateTime         @default(now())
 
   location          Location         @relation(fields: [locationId], references: [id])
+}
+
+// Guard Location Assignment History
+model LocationHistory {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  locationId        String           @db.ObjectId
+  assignedAt        DateTime         @default(now())
+  removedAt         DateTime?
+  reason            String?
+  changedBy         String           // Admin/Manager ID who made the change
+
+  // Note: Guard relation removed to avoid circular reference
+  // Location relation kept for querying location details
+  location          Location         @relation(fields: [locationId], references: [id])
+
+  @@index([guardId])
+  @@index([locationId])
+}
+
+// Guard Manager Assignment History
+model ManagerHistory {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  guardId           String           @db.ObjectId
+  managerId         String           @db.ObjectId  // CarGuard ID of the manager
+  assignedAt        DateTime         @default(now())
+  removedAt         DateTime?
+  reason            String?
+  changedBy         String           // Admin ID who made the change
+
+  // Note: Relations to CarGuard removed to avoid circular reference
+  // Manually join guard/manager data in queries using guardId and managerId
+
+  @@index([guardId])
+  @@index([managerId])
 }

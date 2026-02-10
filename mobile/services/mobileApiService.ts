@@ -334,7 +334,11 @@ function transformGuardData(data: any): GuardData {
     rating: data.rating || 0,
     qrCode: data.qrCode || null,  // Raw payment URL
     qrCodeUrl: data.qrCodeUrl || null,  // Cloudinary branded image
-    location: data.location || null
+    isManager: data.isManager || false,
+    location: data.location || null,
+    manager: data.manager || data.supervisingManager || null,
+    locationAssignedAt: data.locationAssignedAt || null,
+    managerAssignedAt: data.managerAssignedAt || null
   };
 }
 

@@ -24,6 +24,7 @@ import { useUser } from '@clerk/clerk-expo';
 import { commissionService, CommissionInfo } from '../../services/commissionService';
 import { useGuard } from '../../contexts/GuardContext';
 import { getGuardProfile, getTransactions } from '../../services/mobileApiService';
+import { NoLocationBanner, NoManagerBanner, ManagerContactCard } from '../../components/WarningBanner';
 
 // @ts-ignore
 const IS_DEV = __DEV__;
@@ -441,6 +442,74 @@ export default function DashboardScreen() {
             </View>
           </View>
         )}
+
+        {/* Location & Manager Assignment */}
+        <View className="px-6 mt-6">
+          {/* Warning banners for unassigned guards */}
+          {!guardData?.location && (
+            <NoLocationBanner />
+          )}
+          {!guardData?.manager && guardData?.location && (
+            <NoManagerBanner />
+          )}
+
+          {/* Location Card */}
+          {guardData?.location && (
+            <View
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                padding: 16,
+                marginBottom: 16,
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                <View
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: 24,
+                    backgroundColor: '#10B981',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginRight: 12,
+                  }}
+                >
+                  <Ionicons name="location" size={24} color="#FFFFFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>
+                    YOUR LOCATION
+                  </Text>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>
+                    {guardData.location.name}
+                  </Text>
+                </View>
+              </View>
+              <View style={{ paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' }}>
+                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>
+                  Address
+                </Text>
+                <Text style={{ fontSize: 14, color: '#111827' }}>
+                  {guardData.location.address}
+                  {guardData.location.city && `, ${guardData.location.city}`}
+                </Text>
+                {guardData.location.assignedAt && (
+                  <Text style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4 }}>
+                    Assigned: {new Date(guardData.location.assignedAt).toLocaleDateString()}
+                  </Text>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* Manager Contact Card */}
+          {guardData?.manager && (
+            <ManagerContactCard manager={guardData.manager} />
+          )}
+        </View>
 
         {/* Balance Card - Moved Down */}
         <View className="px-6 mt-6">

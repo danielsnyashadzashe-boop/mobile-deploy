@@ -21,11 +21,35 @@ export interface GuardData {
   rating?: number;
   qrCode: string | null;  // Raw payment URL for generating clean QR code
   qrCodeUrl: string | null;  // Cloudinary URL with branding
+
+  // Guard role
+  isManager?: boolean;
+
+  // Location assignment
   location?: {
     id: string;
+    locationId?: string;
     name: string;
     address: string;
+    city?: string;
+    province?: string;
+    operatingHours?: any;
+    assignedAt?: string;
   } | null;
+
+  // Manager assignment (for ordinary guards)
+  manager?: {
+    id: string;
+    guardId: string;
+    name: string;
+    phone: string;
+    email?: string | null;
+    assignedAt?: string;
+  } | null;
+
+  // Assignment dates
+  locationAssignedAt?: string | null;
+  managerAssignedAt?: string | null;
 }
 
 interface GuardContextType {
