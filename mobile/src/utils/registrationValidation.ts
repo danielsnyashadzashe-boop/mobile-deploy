@@ -60,7 +60,7 @@ export const registrationSchema = z.object({
   const hasPassportNumber = data.passportNumber && data.passportNumber.trim() !== ''
 
   if (!hasIdNumber && !hasPassportNumber) return false
-  if (hasIdNumber && !/^[0-9]{13}$/.test(data.idNumber)) return false
+  if (hasIdNumber && !/^[0-9]{13}$/.test(data.idNumber!)) return false
 
   return true
 }, {

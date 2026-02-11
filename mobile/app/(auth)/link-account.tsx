@@ -152,6 +152,7 @@ export default function LinkAccountScreen() {
           totalEarnings: linkResponse.data.lifetimeEarnings || 0,
           status: linkResponse.data.status,
           rating: linkResponse.data.rating || 0,
+          qrCode: linkResponse.data.qrCode || null,
           qrCodeUrl: linkResponse.data.qrCodeUrl || null,
           location: linkResponse.data.location || null,
         };

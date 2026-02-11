@@ -17,7 +17,8 @@
       "Bash(npm run dev:*)",
       "Bash(ls:*)",
       "Bash(ipconfig:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(npx expo prebuild:*)"
     ],
     "deny": [],
     "ask": []

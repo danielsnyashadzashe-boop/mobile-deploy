@@ -303,6 +303,50 @@ export async function getPayouts(clerkUserId: string): Promise<ApiResponse<Payou
 }
 
 /**
+ * Update guard profile
+ */
+export async function updateGuardProfile(
+  clerkUserId: string,
+  data: {
+    name?: string;
+    surname?: string;
+    phone?: string;
+    bankName?: string;
+    accountNumber?: string;
+    branchCode?: string;
+    accountType?: string;
+  }
+): Promise<ApiResponse<GuardData>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/guard/${clerkUserId}/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || 'Failed to update profile',
+      };
+    }
+
+    return {
+      success: true,
+      data: result.data ? transformGuardData(result.data) : undefined,
+    };
+  } catch (error) {
+    console.error('Error updating guard profile:', error);
+    return {
+      success: false,
+      error: 'Failed to update profile. Please try again.',
+    };
+  }
+}
+
+/**
  * Update guard's last active timestamp
  */
 export async function updateActivity(clerkUserId: string): Promise<void> {
@@ -663,6 +707,7 @@ export default {
   linkMobileAccount,
   checkLink,
   getGuardProfile,
+  updateGuardProfile,
   getTransactions,
   getPayouts,
   updateActivity,
