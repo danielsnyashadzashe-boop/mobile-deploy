@@ -17,7 +17,8 @@
       "bundleIdentifier": "com.nogada.tippa.carguard"
     },
     "android": {
-      "package": "com.nogada.tippa.carguard"
+      "package": "com.nogada.tippa.carguard",
+      "usesCleartextTraffic": true
     },
     "web": {
       "bundler": "metro"
