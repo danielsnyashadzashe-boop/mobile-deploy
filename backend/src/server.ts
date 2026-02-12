@@ -12,7 +12,6 @@ import mobileRoutes from './routes/mobile'
 import payoutsRoutes from './routes/payouts'
 import flashRoutes from './routes/flash'
 import clerkWebhookRoutes from './routes/clerk-webhook'
-import assignmentsRoutes from './routes/assignments'
 
 // Load environment variables
 dotenv.config()
@@ -47,7 +46,6 @@ app.use('/api', mobileRoutes) // Mobile app endpoints
 app.use('/api', payoutsRoutes) // 1Voucher and payout endpoints
 app.use('/api', flashRoutes) // Flash API endpoints (airtime, electricity)
 app.use('/api/webhooks', clerkWebhookRoutes) // Clerk webhooks for user sync
-app.use('/api', assignmentsRoutes) // Guard/Manager/Location assignment endpoints
 
 // 404 handler
 app.use((req: Request, res: Response) => {
@@ -63,10 +61,9 @@ app.use((err: Error, req: Request, res: Response, next: any) => {
   })
 })
 
-// Start server - bind to 0.0.0.0 to allow access from mobile devices on the network
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`)
-  console.log(`🌐 Network access: http://10.86.26.195:${PORT}`)
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`)
   console.log(`📊 Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`)
   console.log(`☁️  Cloudinary: ${process.env.CLOUDINARY_CLOUD_NAME ? 'Configured' : 'Not configured'}`)
