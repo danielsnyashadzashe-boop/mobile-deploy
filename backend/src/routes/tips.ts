@@ -151,13 +151,6 @@ router.get('/tips/:id', async (req: Request, res: Response) => {
     const tip = await prisma.tip.findUnique({
       where: { id },
       include: {
-        guard: {
-          select: {
-            guardId: true,
-            name: true,
-            surname: true
-          }
-        },
         location: {
           select: {
             name: true,

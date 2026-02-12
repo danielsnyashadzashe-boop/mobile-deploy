@@ -623,6 +623,11 @@ model Transaction {
   guardId           String           @db.ObjectId
   type              String
   amount            Float
+  status            String?
+  description       String?
+  balance           Float?
+  reference         String?
+  metadata          Json?
   createdAt         DateTime         @default(now())
 
   // Note: guard relation removed to avoid circular reference

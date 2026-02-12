@@ -653,11 +653,10 @@ router.get('/managers/:managerId/guards', async (req: Request, res: Response) =>
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
+    const teamGuardIds = guards.map(g => g.id)
     const todayTransactions = await prisma.transaction.findMany({
       where: {
-        guard: {
-          supervisingManagerId: manager.id
-        },
+        guardId: { in: teamGuardIds },
         type: 'TIP',
         createdAt: {
           gte: today
@@ -763,10 +762,16 @@ router.get('/managers/:managerId/stats', async (req: Request, res: Response) => 
     monthAgo.setMonth(monthAgo.getMonth() - 1)
     monthAgo.setHours(0, 0, 0, 0)
 
+    const managerGuards = await prisma.carGuard.findMany({
+      where: { supervisingManagerId: manager.id },
+      select: { id: true }
+    })
+    const managerGuardIds = managerGuards.map(g => g.id)
+
     const [todayTx, weekTx, monthTx] = await Promise.all([
       prisma.transaction.findMany({
         where: {
-          guard: { supervisingManagerId: manager.id },
+          guardId: { in: managerGuardIds },
           type: 'TIP',
           createdAt: { gte: today }
         },
@@ -774,7 +779,7 @@ router.get('/managers/:managerId/stats', async (req: Request, res: Response) => 
       }),
       prisma.transaction.findMany({
         where: {
-          guard: { supervisingManagerId: manager.id },
+          guardId: { in: managerGuardIds },
           type: 'TIP',
           createdAt: { gte: weekAgo }
         },
@@ -782,7 +787,7 @@ router.get('/managers/:managerId/stats', async (req: Request, res: Response) => 
       }),
       prisma.transaction.findMany({
         where: {
-          guard: { supervisingManagerId: manager.id },
+          guardId: { in: managerGuardIds },
           type: 'TIP',
           createdAt: { gte: monthAgo }
         },

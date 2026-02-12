@@ -120,16 +120,7 @@ router.get('/transactions/:id', async (req: Request, res: Response) => {
     const { id } = req.params
 
     const transaction = await prisma.transaction.findUnique({
-      where: { id },
-      include: {
-        guard: {
-          select: {
-            guardId: true,
-            name: true,
-            surname: true
-          }
-        }
-      }
+      where: { id }
     })
 
     if (!transaction) {
@@ -245,7 +236,7 @@ router.post('/transactions', async (req: Request, res: Response) => {
         id: transaction.id,
         type: transaction.type.toLowerCase(),
         amount: transaction.amount,
-        status: transaction.status.toLowerCase(),
+        status: (transaction.status || 'completed').toLowerCase(),
         newBalance
       }
     })
