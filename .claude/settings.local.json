@@ -6,19 +6,7 @@
       "mcp__playwright-mcp__playwright_screenshot",
       "mcp__playwright-mcp__playwright_get_visible_text",
       "mcp__playwright-mcp__playwright_fill",
-      "mcp__playwright-mcp__playwright_navigate",
-      "Bash(npx expo install:*)",
-      "Bash(npm install:*)",
-      "Bash(curl:*)",
-      "Bash(npx tsc:*)",
-      "Bash(timeout 2 npm run dev:*)",
-      "Bash(npx ts-node:*)",
-      "Bash(npx prisma generate:*)",
-      "Bash(npm run dev:*)",
-      "Bash(ls:*)",
-      "Bash(ipconfig:*)",
-      "Bash(findstr:*)",
-      "Bash(npx expo prebuild:*)"
+      "mcp__playwright-mcp__playwright_navigate"
     ],
     "deny": [],
     "ask": []
