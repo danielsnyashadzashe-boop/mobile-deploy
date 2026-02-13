@@ -205,16 +205,7 @@ router.get('/payouts/:id', async (req: Request, res: Response) => {
     const { id } = req.params
 
     const payout = await prisma.payout.findUnique({
-      where: { id },
-      include: {
-        guard: {
-          select: {
-            guardId: true,
-            name: true,
-            surname: true
-          }
-        }
-      }
+      where: { id }
     })
 
     if (!payout) {

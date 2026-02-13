@@ -33,9 +33,12 @@ export default function Index() {
         return;
       }
 
-      // Check if the Clerk user is linked to a guard profile
+      // Check if the Clerk user is linked to a guard profile (with timeout)
       try {
-        const response = await checkLink(user.id);
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 5000)
+        );
+        const response = await Promise.race([checkLink(user.id), timeout]);
 
         if (response.success && response.data?.isLinked && response.data?.guard) {
           // User is linked - save data and go to dashboard
@@ -47,7 +50,7 @@ export default function Index() {
         }
       } catch (error) {
         console.error('Error checking link status:', error);
-        // On error, send to link account screen
+        // On error/timeout, send to link account screen
         setRedirectTo('/(auth)/link-account');
       }
 

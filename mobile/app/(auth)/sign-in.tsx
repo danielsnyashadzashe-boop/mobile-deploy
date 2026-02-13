@@ -125,9 +125,8 @@ export default function SignInScreen() {
       console.log('🔴 Sign in error:', err);
       console.log('🔴 Error details:', JSON.stringify(err, null, 2));
       const errorMessage = getFriendlyErrorMessage(err);
-      const fullMessage = `${errorMessage}\n\nEmail: ${emailAddress}`;
       setError(errorMessage);
-      showModal('error', 'Sign In Failed', fullMessage);
+      showModal('error', 'Sign In Failed', errorMessage);
     } finally {
       setLoading(false);
     }

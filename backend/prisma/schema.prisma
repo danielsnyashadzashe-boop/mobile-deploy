@@ -602,6 +602,11 @@ model Transaction {
   guardId           String           @db.ObjectId
   type              String
   amount            Float
+  status            String?
+  description       String?
+  balance           Float?
+  reference         String?
+  metadata          Json?
   createdAt         DateTime         @default(now())
 
   guard             CarGuard         @relation(fields: [guardId], references: [id])

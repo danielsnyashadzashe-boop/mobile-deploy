@@ -11,23 +11,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { getPayoutRequests } from '../../services/mobileApiService';
+import { getPayoutRequests, PayoutRequest } from '../../services/mobileApiService';
 
 interface PayoutHistoryModalProps {
   visible: boolean;
   onClose: () => void;
   guardId: string;
-}
-
-interface PayoutRequest {
-  id: string;
-  amount: number;
-  status: 'PENDING' | 'APPROVED' | 'COMPLETED' | 'REJECTED';
-  requestDate: string;
-  processDate: string | null;
-  notes: string | null;
-  rejectionReason: string | null;
-  voucherPin: string | null;
 }
 
 const statusConfig = {
@@ -44,6 +33,13 @@ const statusConfig = {
     textColor: '#1E40AF',
     icon: 'checkmark-circle-outline' as const,
     label: 'Approved',
+  },
+  PROCESSING: {
+    color: '#8B5CF6',
+    bgColor: '#EDE9FE',
+    textColor: '#5B21B6',
+    icon: 'sync-outline' as const,
+    label: 'Processing',
   },
   COMPLETED: {
     color: '#10B981',
@@ -145,13 +141,13 @@ export default function PayoutHistoryModal({
         <View style={styles.requestDetails}>
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Requested</Text>
-            <Text style={styles.detailValue}>{formatDate(request.requestDate)}</Text>
+            <Text style={styles.detailValue}>{formatDate(request.requestedAt)}</Text>
           </View>
 
-          {request.processDate && (
+          {request.processedAt && (
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Processed</Text>
-              <Text style={styles.detailValue}>{formatDate(request.processDate)}</Text>
+              <Text style={styles.detailValue}>{formatDate(request.processedAt)}</Text>
             </View>
           )}
 

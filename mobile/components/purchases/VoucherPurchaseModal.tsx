@@ -59,10 +59,10 @@ export default function VoucherPurchaseModal({
 
     setLoading(true);
 
-    const response = await purchaseVoucher({
+    const response = await purchaseVoucher(
       clerkUserId,
       amount,
-    });
+    );
 
     setLoading(false);
 

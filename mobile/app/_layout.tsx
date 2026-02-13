@@ -1,11 +1,11 @@
-import { ClerkProvider, ClerkLoaded } from '@clerk/clerk-expo';
+import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
 import { tokenCache } from '@clerk/clerk-expo/token-cache';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View, ActivityIndicator, Text } from 'react-native';
 import { GuardProvider } from '../contexts/GuardContext';
 import '../global.css';
 
@@ -39,7 +39,7 @@ export default function RootLayout() {
 
   return (
     <ClerkProvider tokenCache={tokenCache} publishableKey={publishableKey}>
-      <ClerkLoaded>
+      <ClerkGate>
         <GuardProvider>
           <SafeAreaProvider>
             <StatusBar style="dark" backgroundColor="#ffffff" translucent={false} />
@@ -71,7 +71,22 @@ export default function RootLayout() {
             </Stack>
           </SafeAreaProvider>
         </GuardProvider>
-      </ClerkLoaded>
+      </ClerkGate>
     </ClerkProvider>
   );
+}
+
+function ClerkGate({ children }: { children: React.ReactNode }) {
+  const { isLoaded } = useAuth();
+
+  if (!isLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' }}>
+        <ActivityIndicator size="large" color="#5B94D3" />
+        <Text style={{ marginTop: 16, color: '#6B7280', fontSize: 16 }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  return <>{children}</>;
 }

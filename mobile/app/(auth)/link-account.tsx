@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useUser, useAuth } from '@clerk/clerk-expo';
 import { router } from 'expo-router';
 import { useGuard } from '../../contexts/GuardContext';
-import { verifyAccessCode, linkMobileAccount, checkLink } from '../../services/mobileApiService';
+import { verifyAccessCode, linkMobileAccount } from '../../services/mobileApiService';
 
 const COLORS = {
   primary: '#5B94D3',
@@ -31,36 +31,10 @@ const COLORS = {
 export default function LinkAccountScreen() {
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
-  const [checkingLink, setCheckingLink] = useState(true);
   const { user } = useUser();
   const { signOut } = useAuth();
   const { setGuardData } = useGuard();
   const inputRefs = useRef<(TextInput | null)[]>([]);
-
-  // Check if already linked on mount
-  useEffect(() => {
-    checkExistingLink();
-  }, []);
-
-  const checkExistingLink = async () => {
-    if (!user?.id) {
-      setCheckingLink(false);
-      return;
-    }
-
-    try {
-      const response = await checkLink(user.id);
-      if (response.success && response.data?.isLinked && response.data?.guard) {
-        // Already linked - save data and navigate to dashboard
-        await setGuardData(response.data.guard);
-        router.replace('/(tabs)');
-      }
-    } catch (error) {
-      console.error('Error checking link:', error);
-    } finally {
-      setCheckingLink(false);
-    }
-  };
 
   const handleCodeChange = (value: string, index: number) => {
     // Handle paste (when user pastes full code)
@@ -152,6 +126,7 @@ export default function LinkAccountScreen() {
           totalEarnings: linkResponse.data.lifetimeEarnings || 0,
           status: linkResponse.data.status,
           rating: linkResponse.data.rating || 0,
+          qrCode: linkResponse.data.qrCode || null,
           qrCodeUrl: linkResponse.data.qrCodeUrl || null,
           location: linkResponse.data.location || null,
         };
@@ -176,15 +151,6 @@ export default function LinkAccountScreen() {
       console.error('Error signing out:', error);
     }
   };
-
-  if (checkingLink) {
-    return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Checking account...</Text>
-      </SafeAreaView>
-    );
-  }
 
   const isComplete = code.every(digit => digit !== '');
 

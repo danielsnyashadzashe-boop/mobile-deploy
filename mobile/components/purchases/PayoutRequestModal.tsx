@@ -53,11 +53,11 @@ export default function PayoutRequestModal({
 
     setLoading(true);
 
-    const response = await requestPayout({
+    const response = await requestPayout(
       guardId,
-      amount: amountValue,
-      notes: notes.trim() || undefined,
-    });
+      amountValue,
+      notes.trim() || undefined,
+    );
 
     setLoading(false);
 

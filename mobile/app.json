@@ -8,6 +8,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
+      "image": "./assets/images/Tippa Logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#10B981"
     },
@@ -16,14 +17,16 @@
       "bundleIdentifier": "com.nogada.tippa.carguard"
     },
     "android": {
-      "package": "com.nogada.tippa.carguard"
+      "package": "com.nogada.tippa.carguard",
+      "usesCleartextTraffic": true
     },
     "web": {
       "bundler": "metro"
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
