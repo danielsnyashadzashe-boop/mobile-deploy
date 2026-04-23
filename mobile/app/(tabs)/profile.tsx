@@ -13,23 +13,26 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useAuth, useUser } from '@clerk/clerk-expo';
+import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
+import { AlertModal } from '../../components/AlertModal';
 import { updateGuardProfile } from '../../services/mobileApiService';
 
 export default function ProfileScreen() {
-  const { signOut } = useAuth();
-  const { user } = useUser();
+  const { guard: authGuard, logout } = useAuth();
   const { guardData, clearGuardData, isLoading: guardLoading } = useGuard();
   const [isEditing, setIsEditing] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [modal, setModal] = useState<{ visible: boolean; type: 'info' | 'warning' | 'error' | 'success'; title: string; message: string }>({
+    visible: false, type: 'info', title: '', message: '',
+  });
   const [error, setError] = useState<string | null>(null);
   const [profileData, setProfileData] = useState({
-    name: user?.fullName || '',
-    phoneNumber: user?.primaryPhoneNumber?.phoneNumber || '',
-    email: user?.primaryEmailAddress?.emailAddress || '',
+    name: '',
+    phoneNumber: '',
+    email: '',
     bankName: '',
     accountNumber: '',
     accountType: '',
@@ -55,19 +58,18 @@ export default function ProfileScreen() {
   }, [guardData, guardLoading]);
 
   const handleSave = async () => {
-    if (!user?.id) {
+    if (!authGuard?.guardId) {
       Alert.alert('Error', 'Not authenticated. Please sign in again.');
       return;
     }
 
     setLoading(true);
     try {
-      // Parse name into first and last name
       const nameParts = profileData.name.trim().split(' ');
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
 
-      const response = await updateGuardProfile(user.id, {
+      const response = await updateGuardProfile(authGuard.guardId, {
         name: firstName,
         surname: lastName,
         phone: profileData.phoneNumber,
@@ -102,8 +104,8 @@ export default function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await clearGuardData(); // Clear guard data from context and storage
-              await signOut();
+              await clearGuardData();
+              await logout();
               router.replace('/(auth)/sign-in');
             } catch (error) {
               console.error('Sign out error:', error);
@@ -145,22 +147,14 @@ export default function ProfileScreen() {
             </View>
           ) : guardData ? (
             <>
-              {user?.imageUrl ? (
-                <Image
-                  source={{ uri: user.imageUrl }}
-                  style={{ width: 96, height: 96, borderRadius: 48 }}
-                  className="mb-4"
-                />
-              ) : (
-                <View style={{ backgroundColor: '#5B94D333' }} className="w-24 h-24 rounded-full items-center justify-center mb-4">
-                  <Text style={{ color: '#5B94D3' }} className="text-3xl font-bold">
-                    {(user?.fullName || guardData.name).split(' ').map(n => n[0]).join('')}
-                  </Text>
-                </View>
-              )}
+              <View style={{ backgroundColor: '#5B94D333' }} className="w-24 h-24 rounded-full items-center justify-center mb-4">
+                <Text style={{ color: '#5B94D3' }} className="text-3xl font-bold">
+                  {guardData.fullName.split(' ').map((n: string) => n[0]).join('')}
+                </Text>
+              </View>
 
-              <Text className="text-xl font-bold text-gray-900">{user?.fullName || guardData.name}</Text>
-              <Text className="text-sm text-gray-500">{user?.primaryEmailAddress?.emailAddress || 'Guard ID: ' + guardData.id}</Text>
+              <Text className="text-xl font-bold text-gray-900">{guardData.fullName}</Text>
+              <Text className="text-sm text-gray-500">Guard ID: {guardData.guardId}</Text>
 
               <View className="flex-row items-center mt-2">
                 <View className="flex-row items-center px-3 py-1 bg-green-50 rounded-full">
@@ -317,28 +311,55 @@ export default function ProfileScreen() {
             />
           </View>
 
-          <TouchableOpacity className="flex-row justify-between items-center py-3 border-b border-gray-100">
+          <TouchableOpacity
+            className="flex-row justify-between items-center py-3 border-b border-gray-100"
+            onPress={() => setModal({
+              visible: true,
+              type: 'info',
+              title: 'Change Access Code',
+              message: 'Access codes are managed by your administrator.\n\nTo get a new access code, please contact your manager and ask them to generate one for you from the admin portal. They can send it to you directly.\n\nOnce you have the new code, you can use it to sign in.',
+            })}
+            activeOpacity={0.6}
+          >
             <View className="flex-row items-center">
               <Ionicons name="lock-closed-outline" size={20} color="#6B7280" />
-              <Text className="ml-3 text-gray-700">Change PIN</Text>
+              <Text className="ml-3 text-gray-700">Change Access Code</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+            <Ionicons name="information-circle-outline" size={20} color="#9CA3AF" />
           </TouchableOpacity>
 
-          <TouchableOpacity className="flex-row justify-between items-center py-3 border-b border-gray-100">
+          <TouchableOpacity
+            className="flex-row justify-between items-center py-3 border-b border-gray-100"
+            onPress={() => setModal({
+              visible: true,
+              type: 'info',
+              title: 'Help & Support',
+              message: 'For any issues, questions, or assistance with your Tippa CarGuard account, please contact your manager or supervisor directly.\n\nYour manager has access to the admin portal and can assist with:\n• Account issues\n• Balance queries\n• Payout requests\n• Access code resets\n\nFor technical issues with the app, ask your manager to contact Ionic Innovate support.',
+            })}
+            activeOpacity={0.6}
+          >
             <View className="flex-row items-center">
               <Ionicons name="help-circle-outline" size={20} color="#6B7280" />
               <Text className="ml-3 text-gray-700">Help & Support</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+            <Ionicons name="information-circle-outline" size={20} color="#9CA3AF" />
           </TouchableOpacity>
 
-          <TouchableOpacity className="flex-row justify-between items-center py-3">
+          <TouchableOpacity
+            className="flex-row justify-between items-center py-3"
+            onPress={() => setModal({
+              visible: true,
+              type: 'info',
+              title: 'About Tippa CarGuard',
+              message: 'Tippa CarGuard v1.0\n\nTippa is a digital tipping platform that allows customers to tip car guards quickly and securely via QR code.\n\nFor more information about the platform, features, or your account setup, please speak to your manager or contact Ionic Innovate.\n\nDeveloped by Ionic Innovate.',
+            })}
+            activeOpacity={0.6}
+          >
             <View className="flex-row items-center">
               <Ionicons name="information-circle-outline" size={20} color="#6B7280" />
               <Text className="ml-3 text-gray-700">About</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+            <Ionicons name="information-circle-outline" size={20} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
 
@@ -351,6 +372,14 @@ export default function ProfileScreen() {
           <Text style={{ color: '#B01519' }} className="font-semibold">Logout</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <AlertModal
+        visible={modal.visible}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onClose={() => setModal(prev => ({ ...prev, visible: false }))}
+      />
     </SafeAreaView>
   );
 }

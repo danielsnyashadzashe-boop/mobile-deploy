@@ -247,8 +247,9 @@ export async function getGuardProfile(clerkUserId: string): Promise<ApiResponse<
  * Get transactions for a guard by Clerk user ID
  */
 export async function getTransactions(
-  clerkUserId: string,
-  params?: { limit?: number; offset?: number; type?: string }
+  guardId: string,
+  params?: { limit?: number; offset?: number; type?: string },
+  token?: string
 ): Promise<ApiResponse<{ transactions: Transaction[]; pagination: { total: number; hasMore: boolean } }>> {
   try {
     const queryParams = new URLSearchParams();
@@ -257,7 +258,9 @@ export async function getTransactions(
     if (params?.type) queryParams.set('type', params.type);
 
     const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
-    const response = await fetch(`${API_BASE_URL}/api/mobile/guard/${clerkUserId}/transactions${queryString}`);
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/transactions${queryString}`, { headers });
     const result = await response.json();
 
     if (!response.ok || !result.success) {
@@ -696,6 +699,33 @@ export async function purchaseElectricity(
   }
 }
 
+// ==================== AUTO-PAYOUT SETTINGS ====================
+
+export interface AutoPayoutSettings {
+  enabled: boolean;
+  threshold: number;
+  mode: 'SEMI_AUTO' | 'FULL_AUTO';
+  isCustom: boolean;
+  currentBalance: number;
+  amountUntilAutoPayout: number;
+}
+
+export async function getAutoPayoutSettings(token: string): Promise<ApiResponse<AutoPayoutSettings>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/auto-payout-settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to fetch auto-payout settings' };
+    }
+    return result;
+  } catch (error) {
+    console.error('Error fetching auto-payout settings:', error);
+    return { success: false, error: 'Failed to fetch auto-payout settings' };
+  }
+}
+
 export type { VoucherData, PayoutResult };
 
 export default {
@@ -713,5 +743,6 @@ export default {
   requestBankTransfer,
   requestPayout,
   getPayoutRequests,
+  getAutoPayoutSettings,
   NETWORK_CODES,
 };

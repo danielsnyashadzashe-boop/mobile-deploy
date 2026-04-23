@@ -3,18 +3,12 @@ const { withNativeWind } = require('nativewind/metro');
 
 const config = getDefaultConfig(__dirname);
 
-// Handle SVG files
-const { transformer, resolver } = config;
-
-config.transformer = {
-  ...transformer,
-  babelTransformerPath: require.resolve('react-native-svg-transformer'),
-};
-
+// Handle SVG files — only touch resolver, not transformer
+// (NativeWind's withNativeWind handles the transformer pipeline)
 config.resolver = {
-  ...resolver,
-  assetExts: resolver.assetExts.filter((ext) => ext !== 'svg'),
-  sourceExts: [...resolver.sourceExts, 'svg'],
+  ...config.resolver,
+  assetExts: config.resolver.assetExts.filter((ext) => ext !== 'svg'),
+  sourceExts: [...config.resolver.sourceExts, 'svg'],
 };
 
 module.exports = withNativeWind(config, { input: './global.css' });

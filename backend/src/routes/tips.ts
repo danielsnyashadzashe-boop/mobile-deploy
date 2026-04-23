@@ -1,5 +1,6 @@
 import express, { Request, Response, Router } from 'express'
 import { PrismaClient } from '@prisma/client'
+import { getNetcashServiceKey } from '../lib/settings'
 
 const router: Router = express.Router()
 const prisma = new PrismaClient()
@@ -77,7 +78,7 @@ router.post('/tips', async (req: Request, res: Response) => {
       }
     })
 
-    // Update guard balance
+    // Update guard balance first so we can capture the new balance in the transaction
     const updatedGuard = await prisma.carGuard.update({
       where: { id: guard.id },
       data: {
@@ -90,12 +91,18 @@ router.post('/tips', async (req: Request, res: Response) => {
       }
     })
 
-    // Create transaction record with commission metadata
+    // Create transaction record with full fields
     const transaction = await prisma.transaction.create({
       data: {
         guardId: guard.id,
         type: 'TIP',
-        amount: guardReceivesAmount
+        amount: guardReceivesAmount,
+        status: 'COMPLETED',
+        description: customerName
+          ? `Tip received from ${customerName}`
+          : 'Tip received',
+        reference: reference || null,
+        balance: updatedGuard.balance,
       }
     })
 
@@ -262,6 +269,14 @@ router.post('/webhooks/netcash', async (req: Request, res: Response) => {
   try {
     console.log('📥 Netcash webhook received:', req.body)
 
+    // Verify Netcash service key (read from shared DB Settings collection)
+    const expectedKey = await getNetcashServiceKey()
+    const receivedKey = req.body.ServiceKey || req.headers['x-netcash-service-key']
+    if (!expectedKey || !receivedKey || receivedKey !== expectedKey) {
+      console.warn('⚠️ Netcash webhook rejected: invalid service key')
+      return res.status(401).json({ success: false, error: 'Unauthorized' })
+    }
+
     // Example Netcash webhook payload structure
     // Adjust based on actual Netcash webhook format
     const {
@@ -271,9 +286,6 @@ router.post('/webhooks/netcash', async (req: Request, res: Response) => {
       transactionId,
       customerEmail
     } = req.body
-
-    // Verify webhook authenticity here (signature verification)
-    // ...
 
     if (status !== 'COMPLETED') {
       return res.json({ success: true, message: 'Payment not completed yet' })
@@ -338,7 +350,7 @@ async function processTipInternal(data: any) {
     }
   })
 
-  await prisma.carGuard.update({
+  const updatedGuard = await prisma.carGuard.update({
     where: { id: guard.id },
     data: {
       balance: { increment: guardReceivesAmount },
@@ -350,7 +362,13 @@ async function processTipInternal(data: any) {
     data: {
       guardId: guard.id,
       type: 'TIP',
-      amount: guardReceivesAmount
+      amount: guardReceivesAmount,
+      status: 'COMPLETED',
+      description: customerEmail
+        ? `Tip received from ${customerEmail}`
+        : 'Tip received',
+      reference: reference || null,
+      balance: updatedGuard.balance,
     }
   })
 

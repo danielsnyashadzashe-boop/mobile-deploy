@@ -17,7 +17,7 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useUser } from '@clerk/clerk-expo';
+import { useAuth } from '../contexts/AuthContext';
 import { useGuard } from '../contexts/GuardContext';
 import { SANDBOX_TEST_DATA, IS_SANDBOX_MODE } from '../src/config/api';
 import { isValidMeterNumber, lookupMeter, purchaseElectricity } from '../src/services/flashApi';
@@ -44,9 +44,9 @@ const MAX_AMOUNT = 5000;
 
 export default function ElectricityPurchaseScreen() {
   const router = useRouter();
-  const { user } = useUser();
+  const { guard: authGuard } = useAuth();
   const { guardData, updateBalance } = useGuard();
-  const clerkUserId = user?.id;
+  const clerkUserId = authGuard?.guardPublicId || '';
 
   const [meterNumber, setMeterNumber] = useState('');
   const [amount, setAmount] = useState<number>(0);

@@ -9,18 +9,19 @@ import {
   TouchableWithoutFeedback,
   Modal,
   TextInput,
-  Alert,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useUser } from '@clerk/clerk-expo';
+import { useAuth } from '../../contexts/AuthContext';
 import { mockTransactions, formatCurrency, formatDate } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
 import { getTransactions, Transaction } from '../../services/mobileApiService';
 
 export default function HistoryScreen() {
-  const { user } = useUser();
+  const { guard: authGuard, token, logoutWithMessage } = useAuth();
   const { guardData, isLoading: guardLoading } = useGuard();
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -47,16 +48,16 @@ export default function HistoryScreen() {
 
   // Load transactions when guard data is available
   useEffect(() => {
-    if (guardData && !guardLoading && user?.id) {
+    if (token && authGuard) {
       loadData();
-    } else if (!guardLoading && !guardData) {
-      setError('Guard profile not found. Please link your account.');
+    } else if (!token) {
+      setError('Not authenticated. Please sign in again.');
       setLoading(false);
     }
-  }, [guardData, guardLoading, user]);
+  }, [token, authGuard]);
 
   const loadData = async () => {
-    if (!user?.id) {
+    if (!token) {
       setError('Not authenticated. Please sign in again.');
       setLoading(false);
       return;
@@ -66,11 +67,15 @@ export default function HistoryScreen() {
       setError(null);
       setLoading(true);
 
-      // Fetch transactions from admin API using clerkUserId
-      const response = await getTransactions(user.id, { limit: 100 });
+      const response = await getTransactions('', { limit: 100 }, token);
 
       if (!response.success) {
-        setError(response.error || 'Failed to load transactions');
+        const err = response.error || '';
+        if (err.includes('Unauthorised') || err.includes('expired') || err.includes('invalid')) {
+          await logoutWithMessage('Your session has expired. Please sign in again with a new access code from your manager.');
+          return;
+        }
+        setError(err || 'Failed to load transactions');
         setLoading(false);
         return;
       }
@@ -90,12 +95,12 @@ export default function HistoryScreen() {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
-  }, [user]);
+  }, [token]);
 
   // Helper function to check if a date falls within a specific period
   const isDateInPeriod = (dateString: string, period: string): boolean => {
     const transactionDate = new Date(dateString);
-    const today = new Date('2025-09-02'); // Current date from environment
+    const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
 
@@ -148,20 +153,20 @@ export default function HistoryScreen() {
 
     // Type filter
     if (selectedFilter === 'all') return true;
-    if (selectedFilter === 'income') return tx.amount > 0; // Tips are income
-    if (selectedFilter === 'expenses') return tx.amount < 0; // Payouts/purchases are expenses
-    
+    if (selectedFilter === 'income') return ['TIP'].includes(tx.type.toUpperCase());
+    if (selectedFilter === 'expenses') return ['PAYOUT', 'AIRTIME', 'ELECTRICITY', 'VOUCHER'].includes(tx.type.toUpperCase());
+
     return true;
   });
 
   // Calculate summary stats for filtered transactions
   const income = filteredTransactions
-    .filter(tx => tx.amount > 0)
+    .filter(tx => ['TIP'].includes(tx.type.toUpperCase()))
     .reduce((sum, tx) => sum + tx.amount, 0);
-  
-  const expenses = Math.abs(filteredTransactions
-    .filter(tx => tx.amount < 0)
-    .reduce((sum, tx) => sum + tx.amount, 0));
+
+  const expenses = filteredTransactions
+    .filter(tx => ['PAYOUT', 'AIRTIME', 'ELECTRICITY', 'VOUCHER'].includes(tx.type.toUpperCase()))
+    .reduce((sum, tx) => sum + tx.amount, 0);
   
   const netAmount = income - expenses;
 
@@ -209,14 +214,14 @@ export default function HistoryScreen() {
   };
 
   const getTransactionIcon = (type: string) => {
-    switch (type) {
-      case 'tip':
+    switch (type.toUpperCase()) {
+      case 'TIP':
         return { name: 'cash', color: '#10B981' };
-      case 'payout':
+      case 'PAYOUT':
         return { name: 'wallet', color: '#B01519' };
-      case 'airtime':
+      case 'AIRTIME':
         return { name: 'phone-portrait', color: '#5B94D3' };
-      case 'electricity':
+      case 'ELECTRICITY':
         return { name: 'flash', color: '#F59E0B' };
       default:
         return { name: 'swap-horizontal', color: '#5B94D3' };
@@ -237,9 +242,17 @@ export default function HistoryScreen() {
 
           <View className="flex-1">
             <View className="flex-row items-center justify-between">
-              <Text className="text-sm font-semibold text-gray-900">
-                {item.description}
-              </Text>
+              <View className="flex-row items-center flex-1 gap-2 mr-2">
+                <Text className="text-sm font-semibold text-gray-900 flex-shrink">
+                  {item.description || (item.type === 'TIP' ? 'Tip received' : item.type)}
+                </Text>
+                {item.isAutomatic && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, gap: 3 }}>
+                    <Ionicons name="flash" size={10} color="#059669" />
+                    <Text style={{ fontSize: 10, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#059669' }}>Auto</Text>
+                  </View>
+                )}
+              </View>
               <Text
                 className="text-sm font-bold"
                 style={{ color: item.amount > 0 ? '#10B981' : '#B01519' }}
@@ -284,363 +297,303 @@ export default function HistoryScreen() {
     );
   };
 
+  // Quick month ranges (last 3 months)
+  const quickMonths = Array.from({ length: 3 }, (_, i) => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    const label = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+    const start = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    const end = new Date(y, m + 1, 0).toISOString().split('T')[0];
+    return { label, start, end };
+  });
+
   return (
     <TouchableWithoutFeedback onPress={() => setShowPeriodDropdown(false)}>
-      <SafeAreaView className="flex-1 bg-gray-50" edges={['top', 'left', 'right']}>
-      {/* Header */}
-      <View className="bg-white px-4 py-4">
-        <Text className="text-xl font-bold text-gray-900">Transaction History</Text>
-      </View>
+      <SafeAreaView style={hStyles.container} edges={['top', 'left', 'right']}>
 
-      {/* Summary Overview - Like Original */}
-      <View className="bg-white px-4 pb-4">
-        <View className="flex-row justify-between">
-          <View className="items-center bg-green-50 rounded-lg px-3 py-2 flex-1 mr-2">
-            <View className="flex-row items-center mb-1">
-              <Text className="text-xs text-green-600 font-medium">Income</Text>
-              <View style={{ marginLeft: 4 }}>
-                <Ionicons name="information-circle-outline" size={12} color="#059669" />
-              </View>
-            </View>
-            <Text className="text-lg font-bold text-green-600">{formatCurrency(income)}</Text>
-          </View>
-          
-          <View className="items-center bg-red-50 rounded-lg px-3 py-2 flex-1 mx-1">
-            <View className="flex-row items-center mb-1">
-              <Text className="text-xs text-red-600 font-medium">Expenses</Text>
-              <View style={{ marginLeft: 4 }}>
-                <Ionicons name="information-circle-outline" size={12} color="#DC2626" />
-              </View>
-            </View>
-            <Text className="text-lg font-bold text-red-600">{formatCurrency(expenses)}</Text>
-          </View>
-          
-          <View className="items-center bg-gray-50 rounded-lg px-3 py-2 flex-1 ml-2">
-            <View className="flex-row items-center mb-1">
-              <Text className="text-xs text-gray-600 font-medium">Net</Text>
-              <View style={{ marginLeft: 4 }}>
-                <Ionicons name={netAmount >= 0 ? "trending-up-outline" : "trending-down-outline"} size={12} color="#6B7280" />
-              </View>
-            </View>
-            <Text
-              className="text-lg font-bold"
-              style={{ color: netAmount >= 0 ? '#10B981' : '#B01519' }}
-            >
-              {formatCurrency(Math.abs(netAmount))}
-            </Text>
-          </View>
-        </View>
-      </View>
+        {/* ── Gradient header with summary ── */}
+        <LinearGradient colors={['#5B94D3', '#11468F']} style={hStyles.header}>
+          <Text style={hStyles.headerTitle}>History</Text>
+          <Text style={hStyles.headerSub}>Your transaction overview</Text>
 
-      {/* Filters Section */}
-      <View className="bg-white border-t border-gray-100 px-4 py-3">
-        <Text className="text-sm font-semibold text-gray-700 mb-3">Filters</Text>
-        
-        {/* Dropdown and Custom Range Row */}
-        <View className="flex-row items-center justify-between mb-3">
-          {/* Period Dropdown */}
-          <View className="relative flex-1 mr-3">
-            <TouchableOpacity 
+          <View style={hStyles.summaryRow}>
+            <View style={hStyles.summaryCard}>
+              <View style={hStyles.summaryIconRow}>
+                <Ionicons name="arrow-down-circle-outline" size={14} color="#6EE7B7" />
+                <Text style={hStyles.summaryLabel}>Income</Text>
+              </View>
+              <Text style={[hStyles.summaryAmount, { color: '#6EE7B7' }]}>{formatCurrency(income)}</Text>
+            </View>
+
+            <View style={hStyles.summaryDivider} />
+
+            <View style={hStyles.summaryCard}>
+              <View style={hStyles.summaryIconRow}>
+                <Ionicons name="arrow-up-circle-outline" size={14} color="#FCA5A5" />
+                <Text style={hStyles.summaryLabel}>Expenses</Text>
+              </View>
+              <Text style={[hStyles.summaryAmount, { color: '#FCA5A5' }]}>{formatCurrency(expenses)}</Text>
+            </View>
+
+            <View style={hStyles.summaryDivider} />
+
+            <View style={hStyles.summaryCard}>
+              <View style={hStyles.summaryIconRow}>
+                <Ionicons name={netAmount >= 0 ? 'trending-up-outline' : 'trending-down-outline'} size={14} color="#E0F2FE" />
+                <Text style={hStyles.summaryLabel}>Net</Text>
+              </View>
+              <Text style={[hStyles.summaryAmount, { color: '#E0F2FE' }]}>{formatCurrency(Math.abs(netAmount))}</Text>
+            </View>
+          </View>
+        </LinearGradient>
+
+        {/* ── Filter bar ── */}
+        <View style={hStyles.filterBar}>
+          {/* Period picker */}
+          <View style={{ position: 'relative', flex: 1, marginRight: 10 }}>
+            <TouchableOpacity
+              style={hStyles.periodBtn}
               onPress={() => setShowPeriodDropdown(!showPeriodDropdown)}
-              className="bg-gray-100 rounded-lg px-3 py-2.5 flex-row items-center justify-between"
+              activeOpacity={0.7}
             >
-              <Text className="text-sm text-gray-700">{selectedPeriod}</Text>
-              <Ionicons 
-                name={showPeriodDropdown ? "chevron-up" : "chevron-down"} 
-                size={16} 
-                color="#6B7280" 
-              />
+              <Ionicons name="calendar-outline" size={15} color="#5B94D3" />
+              <Text style={hStyles.periodBtnText}>{selectedPeriod}</Text>
+              <Ionicons name={showPeriodDropdown ? 'chevron-up' : 'chevron-down'} size={14} color="#9CA3AF" />
             </TouchableOpacity>
-            
-            {/* Dropdown Menu */}
+
             {showPeriodDropdown && (
-              <View className="absolute top-11 left-0 right-0 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
-                {periodOptions.map((period) => (
+              <View style={hStyles.dropdown}>
+                {periodOptions.map(p => (
                   <TouchableOpacity
-                    key={period}
-                    onPress={() => {
-                      setSelectedPeriod(period);
-                      setShowPeriodDropdown(false);
-                      setCurrentPage(1); // Reset pagination
-                    }}
-                    style={{
-                      paddingHorizontal: 12,
-                      paddingVertical: 10,
-                      borderBottomWidth: 1,
-                      borderBottomColor: '#F3F4F6',
-                      backgroundColor: period === selectedPeriod ? '#F0F8FF' : 'transparent'
-                    }}
+                    key={p}
+                    onPress={() => { setSelectedPeriod(p); setShowPeriodDropdown(false); setCurrentPage(1); }}
+                    style={[hStyles.dropdownItem, p === selectedPeriod && hStyles.dropdownItemActive]}
                   >
-                    <Text style={{
-                      fontSize: 14,
-                      color: period === selectedPeriod ? '#5B94D3' : '#374151',
-                      fontWeight: period === selectedPeriod ? '500' : '400'
-                    }}>
-                      {period}
-                    </Text>
+                    <Text style={[hStyles.dropdownText, p === selectedPeriod && hStyles.dropdownTextActive]}>{p}</Text>
+                    {p === selectedPeriod && <Ionicons name="checkmark" size={14} color="#5B94D3" />}
                   </TouchableOpacity>
                 ))}
               </View>
             )}
           </View>
 
-          {/* Custom Range Button */}
-          <TouchableOpacity 
-            onPress={() => setShowCustomModal(true)}
-            className="bg-gray-100 rounded-lg px-3 py-2.5"
-          >
-            <View className="flex-row items-center">
-              <Ionicons name="calendar-outline" size={16} color="#6B7280" />
-              <Text className="text-sm text-gray-700 ml-1">Custom</Text>
-            </View>
+          {/* Custom range */}
+          <TouchableOpacity style={hStyles.customBtn} onPress={() => setShowCustomModal(true)} activeOpacity={0.7}>
+            <Ionicons name="options-outline" size={15} color="#5B94D3" />
+            <Text style={hStyles.customBtnText}>Custom</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Type Filters */}
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingRight: 16 }}
-        >
-          {['All', 'Income', 'Expenses'].map((type) => (
-            <TouchableOpacity
-              key={type}
-              onPress={() => {
-                setSelectedFilter(type.toLowerCase());
-                setCurrentPage(1); // Reset pagination
-              }}
-              style={{
-                paddingHorizontal: 16,
-                paddingVertical: 8,
-                borderRadius: 8,
-                marginRight: 8,
-                backgroundColor: (selectedFilter === type.toLowerCase() || (selectedFilter === 'all' && type === 'All'))
-                  ? '#5B94D3'
-                  : '#F3F4F6'
-              }}
-            >
-              <Text style={{
-                fontSize: 14,
-                fontWeight: '500',
-                color: (selectedFilter === type.toLowerCase() || (selectedFilter === 'all' && type === 'All'))
-                  ? '#FFFFFF'
-                  : '#374151'
-              }}>
-                {type}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Transactions List */}
-      <View className="flex-1 bg-white">
-        <View className="px-4 py-3 border-b border-gray-100">
-          <Text className="text-sm text-gray-600">
-            Showing {paginatedTransactions.length} of {filteredTransactions.length} transactions ({selectedPeriod})
-          </Text>
+        {/* ── Type pills ── */}
+        <View style={hStyles.pillRow}>
+          {[{ key: 'all', label: 'All' }, { key: 'income', label: 'Income' }, { key: 'expenses', label: 'Expenses' }].map(f => {
+            const active = selectedFilter === f.key;
+            return (
+              <TouchableOpacity
+                key={f.key}
+                onPress={() => { setSelectedFilter(f.key); setCurrentPage(1); }}
+                style={[hStyles.pill, active && hStyles.pillActive]}
+                activeOpacity={0.7}
+              >
+                <Text style={[hStyles.pillText, active && hStyles.pillTextActive]}>{f.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+          <Text style={hStyles.countText}>{filteredTransactions.length} txn{filteredTransactions.length !== 1 ? 's' : ''}</Text>
         </View>
-        
+
+        {/* ── List ── */}
         <FlatList
           data={paginatedTransactions}
           renderItem={renderTransaction}
-          keyExtractor={(item) => item.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
+          keyExtractor={item => item.id}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5B94D3" />}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 20 }}
           ListEmptyComponent={
             loading ? (
-              <View className="items-center justify-center py-20">
+              <View style={hStyles.centeredState}>
                 <ActivityIndicator size="large" color="#5B94D3" />
-                <Text className="text-gray-500 mt-4">Loading transactions...</Text>
+                <Text style={hStyles.stateText}>Loading transactions...</Text>
               </View>
             ) : error ? (
-              <View className="items-center justify-center py-20 px-8">
-                <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
-                <Text className="text-red-600 font-semibold mt-4 text-center">Unable to load transactions</Text>
-                <Text className="text-sm text-gray-500 mt-2 text-center">{error}</Text>
-                <TouchableOpacity
-                  onPress={loadData}
-                  className="mt-4 bg-tippa-secondary px-6 py-2 rounded-lg"
-                >
-                  <Text className="text-white text-sm font-medium">Retry</Text>
+              <View style={hStyles.centeredState}>
+                <View style={hStyles.stateIconBg}>
+                  <Ionicons name="alert-circle-outline" size={32} color="#DC2626" />
+                </View>
+                <Text style={[hStyles.stateTitle, { color: '#DC2626' }]}>Unable to load</Text>
+                <Text style={hStyles.stateText}>{error}</Text>
+                <TouchableOpacity style={hStyles.retryBtn} onPress={loadData}>
+                  <Text style={hStyles.retryText}>Try Again</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              <View className="items-center justify-center py-20">
-                <Ionicons name="document-text-outline" size={48} color="#9CA3AF" />
-                <Text className="text-gray-500 mt-2 text-center">
-                  No {selectedFilter !== 'all' ? selectedFilter : 'transactions'} found for {selectedPeriod}
-                </Text>
-                <Text className="text-gray-400 text-sm mt-1 text-center">
-                  Try adjusting your filters
+              <View style={hStyles.centeredState}>
+                <View style={hStyles.stateIconBg}>
+                  <Ionicons name="receipt-outline" size={32} color="#9CA3AF" />
+                </View>
+                <Text style={hStyles.stateTitle}>No transactions</Text>
+                <Text style={hStyles.stateText}>
+                  No {selectedFilter !== 'all' ? selectedFilter : ''} transactions for {selectedPeriod}.
                 </Text>
               </View>
             )
           }
-          showsVerticalScrollIndicator={false}
         />
 
-        {/* Pagination Controls */}
+        {/* ── Pagination ── */}
         {totalPages > 1 && (
-          <View className="px-4 py-3 border-t border-gray-100 bg-gray-50">
-            <View className="flex-row justify-between items-center">
-              <TouchableOpacity
-                onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 8,
-                  borderRadius: 8,
-                  backgroundColor: currentPage === 1 ? '#E5E7EB' : '#5B94D3'
-                }}
-              >
-                <Text style={{
-                  fontWeight: '500',
-                  color: currentPage === 1 ? '#9CA3AF' : '#FFFFFF'
-                }}>
-                  Previous
-                </Text>
-              </TouchableOpacity>
-
-              <View className="flex-row space-x-2">
-                <Text className="text-sm text-gray-600">
-                  Page {currentPage} of {totalPages}
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                onPress={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-                style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 8,
-                  borderRadius: 8,
-                  backgroundColor: currentPage === totalPages ? '#E5E7EB' : '#5B94D3'
-                }}
-              >
-                <Text style={{
-                  fontWeight: '500',
-                  color: currentPage === totalPages ? '#9CA3AF' : '#FFFFFF'
-                }}>
-                  Next
-                </Text>
-              </TouchableOpacity>
-            </View>
+          <View style={hStyles.pagination}>
+            <TouchableOpacity
+              style={[hStyles.pageBtn, currentPage === 1 && hStyles.pageBtnDisabled]}
+              onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+            >
+              <Ionicons name="chevron-back" size={16} color={currentPage === 1 ? '#9CA3AF' : '#5B94D3'} />
+            </TouchableOpacity>
+            <Text style={hStyles.pageText}>Page {currentPage} of {totalPages}</Text>
+            <TouchableOpacity
+              style={[hStyles.pageBtn, currentPage === totalPages && hStyles.pageBtnDisabled]}
+              onPress={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage === totalPages}
+            >
+              <Ionicons name="chevron-forward" size={16} color={currentPage === totalPages ? '#9CA3AF' : '#5B94D3'} />
+            </TouchableOpacity>
           </View>
         )}
-      </View>
-      
-      {/* Custom Date Range Modal */}
-      <Modal
-      visible={showCustomModal}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowCustomModal(false)}
-    >
-      <View className="flex-1 justify-end bg-black/50">
-        <View className="bg-white rounded-t-3xl p-6 pb-10">
-          <View className="flex-row justify-between items-center mb-6">
-            <Text className="text-xl font-bold">Custom Date Range</Text>
-            <TouchableOpacity onPress={() => setShowCustomModal(false)}>
-              <Ionicons name="close" size={24} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
 
-          {/* Start Date Input */}
-          <Text className="text-sm font-medium text-gray-700 mb-2">Start Date</Text>
-          <View className="bg-gray-50 rounded-lg px-4 py-3 mb-4">
-            <TextInput
-              value={customStartDate}
-              onChangeText={setCustomStartDate}
-              placeholder="YYYY-MM-DD (e.g., 2025-08-01)"
-              className="text-base"
-              keyboardType="numeric"
-            />
-          </View>
+        {/* ── Custom date range bottom sheet ── */}
+        <Modal visible={showCustomModal} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowCustomModal(false)}>
+          <View style={hStyles.sheetBackdrop}>
+            <View style={hStyles.sheet}>
+              <View style={hStyles.sheetHandle} />
+              <View style={hStyles.sheetHeader}>
+                <Text style={hStyles.sheetTitle}>Custom Date Range</Text>
+                <TouchableOpacity onPress={() => setShowCustomModal(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <Ionicons name="close-circle" size={26} color="#9CA3AF" />
+                </TouchableOpacity>
+              </View>
 
-          {/* End Date Input */}
-          <Text className="text-sm font-medium text-gray-700 mb-2">End Date</Text>
-          <View className="bg-gray-50 rounded-lg px-4 py-3 mb-6">
-            <TextInput
-              value={customEndDate}
-              onChangeText={setCustomEndDate}
-              placeholder="YYYY-MM-DD (e.g., 2025-09-02)"
-              className="text-base"
-              keyboardType="numeric"
-            />
-          </View>
+              <Text style={hStyles.inputLabel}>Start Date</Text>
+              <TextInput
+                style={hStyles.dateInput}
+                value={customStartDate}
+                onChangeText={setCustomStartDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#9CA3AF"
+                keyboardType="numeric"
+              />
 
-          {/* Quick Date Buttons */}
-          <Text className="text-sm font-medium text-gray-700 mb-3">Quick Ranges</Text>
-          <View className="flex-row flex-wrap mb-6">
-            <TouchableOpacity
-              onPress={() => {
-                setCustomStartDate('2025-08-01');
-                setCustomEndDate('2025-08-31');
-              }}
-              className="px-3 py-2 rounded-lg mr-2 mb-2 bg-gray-100"
-            >
-              <Text className="text-sm font-medium text-gray-700">August 2025</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              onPress={() => {
-                setCustomStartDate('2025-07-01');
-                setCustomEndDate('2025-07-31');
-              }}
-              className="px-3 py-2 rounded-lg mr-2 mb-2 bg-gray-100"
-            >
-              <Text className="text-sm font-medium text-gray-700">July 2025</Text>
-            </TouchableOpacity>
+              <Text style={hStyles.inputLabel}>End Date</Text>
+              <TextInput
+                style={hStyles.dateInput}
+                value={customEndDate}
+                onChangeText={setCustomEndDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#9CA3AF"
+                keyboardType="numeric"
+              />
 
-            <TouchableOpacity
-              onPress={() => {
-                setCustomStartDate('2025-06-01');
-                setCustomEndDate('2025-06-30');
-              }}
-              className="px-3 py-2 rounded-lg mr-2 mb-2 bg-gray-100"
-            >
-              <Text className="text-sm font-medium text-gray-700">June 2025</Text>
-            </TouchableOpacity>
-          </View>
+              <Text style={[hStyles.inputLabel, { marginTop: 16 }]}>Quick Select</Text>
+              <View style={hStyles.quickRow}>
+                {quickMonths.map(m => (
+                  <TouchableOpacity
+                    key={m.label}
+                    style={hStyles.quickChip}
+                    onPress={() => { setCustomStartDate(m.start); setCustomEndDate(m.end); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={hStyles.quickChipText}>{m.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
 
-          {/* Info Note */}
-          <View className="bg-blue-50 rounded-lg p-4 mb-6">
-            <View className="flex-row items-center mb-2">
-              <Ionicons name="information-circle" size={20} color="#3B82F6" />
-              <Text className="text-blue-800 font-medium ml-2">Date Format</Text>
+              <View style={hStyles.sheetActions}>
+                <TouchableOpacity
+                  style={hStyles.cancelBtn}
+                  onPress={() => { setCustomStartDate(''); setCustomEndDate(''); setShowCustomModal(false); }}
+                >
+                  <Text style={hStyles.cancelText}>Clear</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={hStyles.applyBtn} onPress={handleApplyCustomRange}>
+                  <Text style={hStyles.applyText}>Apply</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            <Text className="text-blue-700 text-sm">
-              Please use YYYY-MM-DD format (e.g., 2025-09-02). Both dates are inclusive.
-            </Text>
           </View>
+        </Modal>
 
-          {/* Action Buttons */}
-          <View className="flex-row space-x-3">
-            <TouchableOpacity
-              onPress={() => {
-                setCustomStartDate('');
-                setCustomEndDate('');
-                setShowCustomModal(false);
-              }}
-              className="flex-1 bg-gray-100 rounded-lg py-4 items-center"
-            >
-              <Text className="text-gray-700 font-semibold text-base">Cancel</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleApplyCustomRange}
-              style={{ backgroundColor: '#5B94D3' }}
-              className="flex-1 rounded-lg py-4 items-center"
-            >
-              <Text className="text-white font-semibold text-base">Apply Range</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-      </Modal>
       </SafeAreaView>
     </TouchableWithoutFeedback>
   );
 }
+
+const hStyles = StyleSheet.create({
+  container:    { flex: 1, backgroundColor: '#F9FAFB' },
+
+  // Header
+  header:       { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 28 },
+  headerTitle:  { fontSize: 26, fontWeight: '800', fontFamily: 'Nunito-Bold', color: '#fff', marginBottom: 2 },
+  headerSub:    { fontSize: 13, fontFamily: 'Nunito-Regular', color: 'rgba(255,255,255,0.7)', marginBottom: 20 },
+
+  summaryRow:   { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 16, padding: 16 },
+  summaryCard:  { flex: 1, alignItems: 'center' },
+  summaryIconRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  summaryLabel: { fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: '500', fontFamily: 'Nunito-Medium' },
+  summaryAmount:{ fontSize: 17, fontWeight: '800', fontFamily: 'Nunito-Bold' },
+  summaryDivider:{ width: 1, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 8 },
+
+  // Filter bar
+  filterBar:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  periodBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EFF6FF', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  periodBtnText:{ fontSize: 13, color: '#1D4ED8', fontWeight: '600', fontFamily: 'Nunito-SemiBold', flex: 1 },
+  customBtn:    { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#EFF6FF', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  customBtnText:{ fontSize: 13, color: '#1D4ED8', fontWeight: '600', fontFamily: 'Nunito-SemiBold' },
+
+  dropdown:     { position: 'absolute', top: 44, left: 0, right: 0, backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', zIndex: 50, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 8 },
+  dropdownItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#F9FAFB' },
+  dropdownItemActive: { backgroundColor: '#EFF6FF' },
+  dropdownText: { fontSize: 14, fontFamily: 'Nunito-Regular', color: '#374151' },
+  dropdownTextActive: { color: '#5B94D3', fontWeight: '600', fontFamily: 'Nunito-SemiBold' },
+
+  // Pills
+  pillRow:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
+  pill:         { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, backgroundColor: '#F3F4F6' },
+  pillActive:   { backgroundColor: '#5B94D3' },
+  pillText:     { fontSize: 13, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#6B7280' },
+  pillTextActive:{ color: '#fff' },
+  countText:    { marginLeft: 'auto' as any, fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9CA3AF' },
+
+  // Empty / error states
+  centeredState:{ alignItems: 'center', justifyContent: 'center', paddingVertical: 64, paddingHorizontal: 32 },
+  stateIconBg:  { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  stateTitle:   { fontSize: 16, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#374151', marginBottom: 6 },
+  stateText:    { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#9CA3AF', textAlign: 'center', lineHeight: 20 },
+  retryBtn:     { marginTop: 16, backgroundColor: '#5B94D3', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 10 },
+  retryText:    { color: '#fff', fontWeight: '600', fontFamily: 'Nunito-SemiBold', fontSize: 14 },
+
+  // Pagination
+  pagination:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  pageBtn:      { width: 36, height: 36, borderRadius: 18, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
+  pageBtnDisabled: { backgroundColor: '#F3F4F6' },
+  pageText:     { fontSize: 13, color: '#6B7280', fontWeight: '500', fontFamily: 'Nunito-Medium' },
+
+  // Bottom sheet
+  sheetBackdrop:{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet:        { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+  sheetHandle:  { width: 40, height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  sheetHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  sheetTitle:   { fontSize: 18, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827' },
+  inputLabel:   { fontSize: 13, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#374151', marginBottom: 8 },
+  dateInput:    { backgroundColor: '#F9FAFB', borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB', paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, fontFamily: 'Nunito-Regular', color: '#111827', marginBottom: 16 },
+  quickRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
+  quickChip:    { backgroundColor: '#EFF6FF', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
+  quickChipText:{ fontSize: 13, color: '#1D4ED8', fontWeight: '500', fontFamily: 'Nunito-Medium' },
+  sheetActions: { flexDirection: 'row', gap: 12 },
+  cancelBtn:    { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  cancelText:   { color: '#6B7280', fontWeight: '600', fontFamily: 'Nunito-SemiBold', fontSize: 15 },
+  applyBtn:     { flex: 1, backgroundColor: '#5B94D3', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  applyText:    { color: '#fff', fontWeight: '700', fontFamily: 'Nunito-Bold', fontSize: 15 },
+});

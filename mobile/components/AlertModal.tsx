@@ -4,6 +4,7 @@ import {
   Text,
   Modal,
   TouchableOpacity,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -41,41 +42,95 @@ export function AlertModal({
       animationType="fade"
       transparent={true}
       onRequestClose={onClose}
+      statusBarTranslucent={true}
     >
-      <View className="flex-1 justify-center items-center bg-black/50 px-6">
-        <View className="bg-white rounded-2xl p-6 w-full max-w-sm">
+      <View style={styles.backdrop}>
+        <View style={styles.card}>
           {/* Icon */}
-          <View className="items-center mb-4">
-            <View
-              className="w-16 h-16 rounded-full items-center justify-center"
-              style={{ backgroundColor: config.bgColor }}
-            >
+          <View style={styles.iconWrapper}>
+            <View style={[styles.iconCircle, { backgroundColor: config.bgColor }]}>
               <Ionicons name={config.icon} size={36} color={config.color} />
             </View>
           </View>
 
           {/* Title */}
-          <Text className="text-center text-xl font-bold text-gray-900 mb-2">
-            {title}
-          </Text>
+          <Text style={styles.title}>{title}</Text>
 
           {/* Message */}
-          <Text className="text-center text-gray-600 text-base mb-6 leading-6">
-            {message}
-          </Text>
+          <Text style={styles.message}>{message}</Text>
 
           {/* Button */}
           <TouchableOpacity
             onPress={onClose}
-            className="py-4 rounded-xl items-center"
-            style={{ backgroundColor: config.color }}
+            style={[styles.button, { backgroundColor: config.color }]}
+            activeOpacity={0.8}
           >
-            <Text className="text-white font-semibold text-base">{buttonText}</Text>
+            <Text style={styles.buttonText}>{buttonText}</Text>
           </TouchableOpacity>
         </View>
       </View>
     </Modal>
   );
 }
+
+const styles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 360,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  iconWrapper: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  iconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
+    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: 'Nunito-Bold',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  message: {
+    textAlign: 'center',
+    fontSize: 15,
+    fontFamily: 'Nunito-Regular',
+    color: '#6B7280',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  button: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: 'Nunito-SemiBold',
+  },
+});
 
 export default AlertModal;

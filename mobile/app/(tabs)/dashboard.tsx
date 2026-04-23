@@ -20,24 +20,38 @@ import { captureRef } from 'react-native-view-shot';
 import { useRouter } from 'expo-router';
 import { formatCurrency } from '../../data/mockData';
 import { TippaLogo } from '../../components/TippaLogo';
-import { useUser } from '@clerk/clerk-expo';
+import { useAuth } from '../../contexts/AuthContext';
 import { commissionService, CommissionInfo } from '../../services/commissionService';
 import { useGuard } from '../../contexts/GuardContext';
 import { getGuardProfile, getTransactions } from '../../services/mobileApiService';
 
-// @ts-ignore
-const IS_DEV = __DEV__;
-
 export default function DashboardScreen() {
   const router = useRouter();
-  const { user } = useUser();
-  const { guardData, refreshGuardData, isLoading: guardLoading, resetSandboxBalance } = useGuard();
+  const { guard: authGuard, token, refreshGuard } = useAuth();
+  const { guardData: rawGuardData, refreshGuardData, isLoading: guardLoading } = useGuard();
+  // Use authGuard as fallback — both read from same storage key after JWT login
+  const guardData = rawGuardData ?? (authGuard ? {
+    id: authGuard.guardId,
+    guardId: authGuard.guardPublicId,
+    name: authGuard.phone,
+    surname: '',
+    fullName: authGuard.phone,
+    email: null,
+    phone: authGuard.phone,
+    balance: 0,
+    totalEarnings: 0,
+    status: 'ACTIVE',
+    qrCode: null,
+    qrCodeUrl: null,
+  } : null);
   const [refreshing, setRefreshing] = useState(false);
   const [downloadingQR, setDownloadingQR] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const qrViewRef = useRef(null);
   const [commissionRate, setCommissionRate] = useState(0);
+  const [showComingSoon, setShowComingSoon] = useState(false);
+  const [comingSoonFeature, setComingSoonFeature] = useState('');
   const [exampleTip] = useState(20); // Show example for R20 tip
   const [commissionInfo, setCommissionInfo] = useState<CommissionInfo | null>(null);
   const [qrImageLoading, setQrImageLoading] = useState(true);
@@ -47,24 +61,22 @@ export default function DashboardScreen() {
   const [todayEarnings, setTodayEarnings] = useState(0);
   const [weekEarnings, setWeekEarnings] = useState(0);
 
-  // Load QR code and commission data when guard data is available
+  // Load QR code and commission data — use authGuard as primary source
   useEffect(() => {
-    if (guardData && !guardLoading) {
+    if (authGuard && token) {
       loadAdditionalData();
-    } else if (!guardLoading && !guardData) {
-      setError('Guard profile not found. Please link your account.');
+    } else if (!authGuard && !token) {
+      setError('Guard profile not found. Please sign in again.');
       setLoading(false);
     }
-  }, [guardData, guardLoading]);
+  }, [authGuard, token]);
 
   const loadAdditionalData = async () => {
-    if (!guardData) return;
+    if (!authGuard) return;
 
     try {
       setError(null);
-      console.log('🔍 Loading additional data for guard:', guardData.guardId);
-      console.log('🔗 Raw QR Code (payment URL):', guardData.qrCode);
-      console.log('📷 QR Code URL from Cloudinary:', guardData.qrCodeUrl);
+      console.log('🔍 Loading additional data for guard:', authGuard.guardPublicId);
 
       // Reset QR image state when loading new data
       setQrImageLoading(true);
@@ -80,8 +92,8 @@ export default function DashboardScreen() {
       console.log('✅ Commission rate loaded:', rate + '%');
 
       // Fetch transactions from API
-      if (user?.id) {
-        const txResponse = await getTransactions(user.id, { limit: 100 });
+      if (token) {
+        const txResponse = await getTransactions('', { limit: 100 }, token);
         if (txResponse.success && txResponse.data?.transactions) {
           const txList = txResponse.data.transactions;
           setTransactions(txList);
@@ -120,15 +132,15 @@ export default function DashboardScreen() {
     setRefreshing(true);
     try {
       // Refresh guard data from admin API
-      if (user?.id) {
-        await refreshGuardData(user.id);
+      if (authGuard?.guardPublicId) {
+        await refreshGuard();
       }
       // Reload QR code and commission data
       await loadAdditionalData();
     } finally {
       setRefreshing(false);
     }
-  }, [user, refreshGuardData]);
+  }, [authGuard, refreshGuard]);
 
   const downloadQRCode = async () => {
     if (!qrViewRef.current) {
@@ -154,7 +166,7 @@ export default function DashboardScreen() {
       });
 
       // Create filename with guard info
-      const displayName = guardData?.fullName || user?.fullName || 'Guard';
+      const displayName = guardData?.fullName || authGuard?.phone || 'Guard';
       const guardName = displayName.replace(/[^a-zA-Z0-9]/g, '_');
       const guardId = guardData?.guardId || 'N/A';
       const filename = `TippaQR_${guardName}_${guardId}_300DPI.png`;
@@ -210,13 +222,12 @@ export default function DashboardScreen() {
 
     switch (action) {
       case 'airtime':
-        router.push('/airtime-purchase');
+        setComingSoonFeature('Airtime Purchase');
+        setShowComingSoon(true);
         break;
       case 'electricity':
-        router.push('/electricity-purchase');
-        break;
-      case 'voucher':
-        router.push('/voucher-purchase');
+        setComingSoonFeature('Electricity Purchase');
+        setShowComingSoon(true);
         break;
     }
   };
@@ -238,12 +249,6 @@ export default function DashboardScreen() {
   const maxAmount = Math.max(income, expenses, 1); // Minimum 1 to avoid division by zero
   const incomeWidth = maxAmount > 0 ? (income / maxAmount) * 100 : 0;
   const expenseWidth = maxAmount > 0 ? (expenses / maxAmount) * 100 : 0;
-
-  const handleResetSandboxBalance = async () => {
-    await resetSandboxBalance();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Alert.alert('Balance Reset', 'Sandbox balance set to R5,000');
-  };
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50" edges={['top', 'left', 'right']}>
@@ -268,7 +273,7 @@ export default function DashboardScreen() {
           <View className="items-center mb-6">
             <Text className="text-white/80 text-sm">Welcome back,</Text>
             <Text className="text-white text-2xl font-bold">
-              {guardData?.fullName || user?.fullName || 'Guard'}
+              {guardData?.fullName || authGuard?.phone || 'Guard'}
             </Text>
           </View>
 
@@ -344,7 +349,7 @@ export default function DashboardScreen() {
                         {qrImageError ? (
                           <View style={{ alignItems: 'center' }}>
                             <Ionicons name="qr-code-outline" size={80} color="#ccc" />
-                            <Text style={{ color: '#999', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+                            <Text style={{ color: '#999', fontSize: 12, fontFamily: 'Nunito-Regular', marginTop: 8, textAlign: 'center' }}>
                               QR code not available
                             </Text>
                           </View>
@@ -365,7 +370,7 @@ export default function DashboardScreen() {
                     ) : (
                       <View style={{ alignItems: 'center' }}>
                         <Ionicons name="qr-code-outline" size={80} color="#ccc" />
-                        <Text style={{ color: '#999', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+                        <Text style={{ color: '#999', fontSize: 12, fontFamily: 'Nunito-Regular', marginTop: 8, textAlign: 'center' }}>
                           No QR code available{'\n'}Contact your administrator
                         </Text>
                       </View>
@@ -376,7 +381,7 @@ export default function DashboardScreen() {
                 {/* Guard Info */}
                 <View className="items-center mt-4">
                   <Text className="text-lg font-bold text-gray-900">
-                    {guardData?.fullName || user?.fullName || 'Guard'}
+                    {guardData?.fullName || authGuard?.phone || 'Guard'}
                   </Text>
                   <Text className="text-sm text-gray-500">
                     ID: {guardData?.guardId || 'N/A'}
@@ -452,15 +457,6 @@ export default function DashboardScreen() {
                   {formatCurrency(guardData?.balance || 0)}
                 </Text>
               </View>
-              {/* Sandbox Reset Button - Only show in development */}
-              {IS_DEV && (
-                <TouchableOpacity
-                  onPress={handleResetSandboxBalance}
-                  className="bg-purple-100 px-3 py-1.5 rounded-lg"
-                >
-                  <Text className="text-purple-700 text-xs font-medium">Reset Balance</Text>
-                </TouchableOpacity>
-              )}
             </View>
             <View className="flex-row justify-between mt-4">
               <View>
@@ -479,17 +475,17 @@ export default function DashboardScreen() {
         <View className="px-6 mt-6">
           <Text className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</Text>
           <View className="flex-row flex-wrap justify-between">
-            {/* Buy Voucher - Primary Action */}
+            {/* Request Payout - Primary Action */}
             <TouchableOpacity
-              onPress={() => handleQuickAction('voucher')}
+              onPress={() => router.push('/payouts')}
               className="bg-emerald-50 rounded-xl p-4 shadow-sm mb-4 border border-emerald-200"
               style={{ width: '48%' }}
             >
               <View className="bg-emerald-100 w-10 h-10 rounded-full items-center justify-center mb-2">
-                <Ionicons name="ticket-outline" size={20} color="#059669" />
+                <Ionicons name="arrow-up-circle-outline" size={20} color="#059669" />
               </View>
-              <Text className="text-sm font-medium text-gray-900">Buy Voucher</Text>
-              <Text className="text-xs text-gray-500">Cash at stores</Text>
+              <Text className="text-sm font-medium text-gray-900">Request Payout</Text>
+              <Text className="text-xs text-gray-500">Bank transfer</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -616,11 +612,11 @@ export default function DashboardScreen() {
           {/* Header */}
           <View style={{ position: 'absolute', top: 80, alignItems: 'center' }}>
             <TippaLogo size={60} />
-            <Text style={{ fontSize: 18, fontWeight: '600', color: '#111827', marginTop: 12 }}>
+            <Text style={{ fontSize: 18, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#111827', marginTop: 12 }}>
               Scan to Tip
             </Text>
-            <Text style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
-              {guardData?.fullName || user?.fullName || 'Car Guard'}
+            <Text style={{ fontSize: 14, fontFamily: 'Nunito-Regular', color: '#6b7280', marginTop: 4 }}>
+              {guardData?.fullName || authGuard?.phone || 'Car Guard'}
             </Text>
           </View>
 
@@ -648,7 +644,7 @@ export default function DashboardScreen() {
             ) : (
               <View style={{ width: 320, height: 320, justifyContent: 'center', alignItems: 'center' }}>
                 <Ionicons name="qr-code-outline" size={120} color="#ccc" />
-                <Text style={{ color: '#999', fontSize: 14, marginTop: 16, textAlign: 'center' }}>
+                <Text style={{ color: '#999', fontSize: 14, fontFamily: 'Nunito-Regular', marginTop: 16, textAlign: 'center' }}>
                   No QR code available
                 </Text>
               </View>
@@ -657,7 +653,7 @@ export default function DashboardScreen() {
 
           {/* Guard Info */}
           <View style={{ position: 'absolute', bottom: 100, alignItems: 'center' }}>
-            <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>
+            <Text style={{ fontSize: 16, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#111827' }}>
               ID: {guardData?.guardId || 'N/A'}
             </Text>
             <View style={{
@@ -670,7 +666,7 @@ export default function DashboardScreen() {
               borderRadius: 20,
             }}>
               <View style={{ width: 8, height: 8, backgroundColor: '#22c55e', borderRadius: 4, marginRight: 8 }} />
-              <Text style={{ fontSize: 14, color: '#166534' }}>
+              <Text style={{ fontSize: 14, fontFamily: 'Nunito-Regular', color: '#166534' }}>
                 {guardData?.status || 'Active'}
               </Text>
             </View>
@@ -678,9 +674,40 @@ export default function DashboardScreen() {
 
           {/* Instructions */}
           <View style={{ position: 'absolute', bottom: 40, alignItems: 'center' }}>
-            <Text style={{ fontSize: 12, color: '#9ca3af' }}>
+            <Text style={{ fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9ca3af' }}>
               Point your camera at this QR code
             </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Coming Soon Modal */}
+      <Modal
+        visible={showComingSoon}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowComingSoon(false)}
+        statusBarTranslucent
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 28, width: '100%', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 10 }}>
+            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Ionicons name="rocket-outline" size={32} color="#5B94D3" />
+            </View>
+            <Text style={{ fontSize: 20, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827', marginBottom: 8 }}>Coming Soon</Text>
+            <Text style={{ fontSize: 15, fontFamily: 'Nunito-Regular', color: '#6B7280', textAlign: 'center', lineHeight: 22, marginBottom: 8 }}>
+              <Text style={{ fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#374151' }}>{comingSoonFeature}</Text> is not yet available.
+            </Text>
+            <Text style={{ fontSize: 13, fontFamily: 'Nunito-Regular', color: '#9CA3AF', textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>
+              We're working on it and it will be available in a future update. Stay tuned!
+            </Text>
+            <TouchableOpacity
+              onPress={() => setShowComingSoon(false)}
+              style={{ backgroundColor: '#5B94D3', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 40 }}
+              activeOpacity={0.8}
+            >
+              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700', fontFamily: 'Nunito-Bold' }}>Got it</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>

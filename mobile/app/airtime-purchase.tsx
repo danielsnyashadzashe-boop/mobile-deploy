@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { useUser } from '@clerk/clerk-expo';
+import { useAuth } from '../contexts/AuthContext';
 import { useGuard } from '../contexts/GuardContext';
 import { SANDBOX_TEST_DATA, IS_SANDBOX_MODE, NETWORK_PRODUCTS } from '../src/config/api';
 import { formatPhoneNumber, isValidPhoneNumber, purchaseAirtime } from '../src/services/flashApi';
@@ -36,9 +36,9 @@ const MAX_AMOUNT = 999;
 
 export default function AirtimePurchaseScreen() {
   const router = useRouter();
-  const { user } = useUser();
+  const { guard: authGuard } = useAuth();
   const { guardData, updateBalance } = useGuard();
-  const clerkUserId = user?.id;
+  const clerkUserId = authGuard?.guardPublicId || '';
 
   const [phoneNumber, setPhoneNumber] = useState('');
   const [amount, setAmount] = useState<number>(0);

@@ -126,6 +126,11 @@ model CarGuard {
   deactivatedAt     DateTime?
   deactivationReason String?
   lastActiveAt      DateTime?
+
+  // Auto-payout settings (null = use global setting)
+  autoPayoutEnabled   Boolean?
+  autoPayoutThreshold Float?
+
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
@@ -561,6 +566,7 @@ model Payout {
   amount            Float
   status            PayoutStatus     @default(PENDING)
   method            PayoutMethod?
+  isAutomatic       Boolean          @default(false)
 
   // Guard notes
   notes             String?
@@ -590,6 +596,8 @@ enum PayoutStatus {
   PROCESSING
   COMPLETED
   REJECTED
+  CANCELLED
+  FAILED
 }
 
 enum PayoutMethod {
@@ -661,7 +669,7 @@ model Commission {
 
 model CommissionSetting {
   id                String           @id @default(auto()) @map("_id") @db.ObjectId
-  settingId         String           @unique
+  settingId         String?          @unique
   name              String
   description       String?
   percentage        Float
@@ -708,4 +716,18 @@ model Announcement {
   createdAt         DateTime         @default(now())
 
   location          Location         @relation(fields: [locationId], references: [id])
+}
+
+model Settings {
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  key               String           @unique
+  value             String
+  type              String           @default("STRING")
+  category          String
+  description       String?
+  isPublic          Boolean          @default(false)
+  isEditable        Boolean          @default(true)
+  validationRules   Json?
+  updatedBy         String?          @db.ObjectId
+  updatedAt         DateTime         @updatedAt
 }

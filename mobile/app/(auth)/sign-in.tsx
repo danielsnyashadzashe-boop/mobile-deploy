@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -11,189 +11,103 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSignIn, useAuth } from '@clerk/clerk-expo';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Link, useRouter } from 'expo-router';
-import { signInSchema } from '../../src/utils/validation';
-import { getFriendlyErrorMessage } from '../../src/utils/clerkErrorHandler';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../../contexts/AuthContext';
 import { TippaLogo } from '../../components/TippaLogo';
 import { AlertModal } from '../../components/AlertModal';
 
 type AlertType = 'error' | 'success' | 'info' | 'warning';
 
 export default function SignInScreen() {
-  const { isLoaded, signIn, setActive } = useSignIn();
-  const { isSignedIn } = useAuth();
+  const { login, sessionExpiredMessage } = useAuth();
   const router = useRouter();
-  const [emailAddress, setEmailAddress] = useState('');
-  const [password, setPassword] = useState('');
+
+  const [step, setStep] = useState<'phone' | 'code'>('phone');
+  const [phone, setPhone] = useState('');
+  const [accessCode, setAccessCode] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [needsTwoFactor, setNeedsTwoFactor] = useState(false);
-  const [twoFactorCode, setTwoFactorCode] = useState('');
-  const [twoFactorStrategy, setTwoFactorStrategy] = useState<'totp' | 'phone_code' | 'backup_code'>('totp');
   const [modal, setModal] = useState<{ visible: boolean; type: AlertType; title: string; message: string }>({
     visible: false, type: 'error', title: '', message: '',
   });
 
-  const showModal = (type: AlertType, title: string, message: string) => {
+  // Show session expiry message as soon as the screen loads
+  React.useEffect(() => {
+    if (sessionExpiredMessage) {
+      setModal({ visible: true, type: 'warning', title: 'Session Ended', message: sessionExpiredMessage });
+    }
+  }, [sessionExpiredMessage]);
+
+  const showModal = (type: AlertType, title: string, message: string) =>
     setModal({ visible: true, type, title, message });
+
+  const formatPhone = (raw: string) => raw.replace(/[^\d+]/g, '');
+
+  const handlePhoneNext = () => {
+    const p = formatPhone(phone);
+    if (p.length < 9) {
+      showModal('warning', 'Invalid Number', 'Please enter a valid South African phone number.');
+      return;
+    }
+    setStep('code');
   };
 
-  // Redirect if already signed in
-  useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      router.replace('/');
-    }
-  }, [isLoaded, isSignedIn]);
-
-  const checkRegistrationStatus = async (userId: string) => {
-    try {
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-      console.log('🔍 API URL being used:', apiUrl);
-      console.log('🔍 Full URL:', `${apiUrl}/api/registration/check`);
-      const response = await fetch(`${apiUrl}/api/registration/check`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clerkUserId: userId }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        return data;
-      }
-
-      // If API call fails, allow access to app
-      return { canAccessApp: true };
-    } catch (error) {
-      // On error, allow access to app
-      return { canAccessApp: true };
-    }
-  };
-
-  const onSignInPress = async () => {
-    if (!isLoaded) return;
-
-    setError('');
-
-    // Validate inputs with Zod
-    const validation = signInSchema.safeParse({
-      emailAddress,
-      password,
-    });
-
-    if (!validation.success) {
-      const firstError = validation.error.errors[0];
-      setError(firstError.message);
-      showModal('warning', 'Validation Error', firstError.message);
+  const handleLogin = async () => {
+    if (accessCode.length !== 6) {
+      showModal('warning', 'Invalid Code', 'Please enter the 6-digit access code from your manager.');
       return;
     }
 
     setLoading(true);
+    const result = await login(phone, accessCode);
+    setLoading(false);
 
-    try {
-      const completeSignIn = await signIn.create({
-        identifier: emailAddress,
-        password,
-      });
+    if (result.success) {
+      router.replace('/(tabs)');
+    } else {
+      const raw = result.error || '';
+      let title = 'Sign In Failed';
+      let message = raw;
+      let type: AlertType = 'error';
 
-      console.log('✅ Sign in response status:', completeSignIn.status);
-      console.log('✅ Created session ID:', completeSignIn.createdSessionId);
-
-      // If sign-in is complete, activate session and go to app
-      if (completeSignIn.status === 'complete') {
-        await setActive({ session: completeSignIn.createdSessionId });
-        // SIMPLIFIED: Go directly to app, skip registration flow
-        router.replace('/(tabs)');
-        return;
+      if (raw.includes('expired')) {
+        title = 'Access Code Expired';
+        message = 'Your access code has expired. Please contact your manager to generate a new one — it only takes a moment.';
+        type = 'warning';
+      } else if (raw.includes('No access code')) {
+        title = 'No Access Code Set';
+        message = 'Your account does not have an active access code. Please ask your manager to generate one for you from the admin portal.';
+        type = 'info';
+      } else if (raw.includes('Invalid phone') || raw.includes('Invalid phone number or access code')) {
+        title = 'Incorrect Details';
+        message = 'The phone number or access code you entered is incorrect. Please double-check and try again. Each access code can only be used once.';
+        type = 'error';
+      } else if (raw.includes('not active') || raw.includes('inactive') || raw.includes('suspended')) {
+        title = 'Account Inactive';
+        message = 'Your account is currently inactive. Please contact your manager to have it reactivated.';
+        type = 'warning';
+      } else if (raw.includes('connect') || raw.includes('network') || raw.includes('connection')) {
+        title = 'Connection Problem';
+        message = 'Could not reach the server. Please check your internet connection and try again.';
+        type = 'warning';
       }
 
-      // Handle 2FA requirement
-      if (completeSignIn.status === 'needs_second_factor') {
-        const supportedFactors = completeSignIn.supportedSecondFactors;
-        console.log('🔐 Supported 2FA factors:', JSON.stringify(supportedFactors));
-
-        // Prefer phone_code (SMS), then totp, then whatever is available
-        const phoneFactor = supportedFactors?.find((f: any) => f.strategy === 'phone_code');
-        const totpFactor = supportedFactors?.find((f: any) => f.strategy === 'totp');
-        const chosenFactor = phoneFactor || totpFactor || supportedFactors?.[0];
-        const strategy = chosenFactor?.strategy;
-        console.log('🔐 Using 2FA strategy:', strategy);
-
-        if (strategy === 'phone_code') {
-          setTwoFactorStrategy('phone_code');
-          const result = await signIn.prepareSecondFactor({ strategy: 'phone_code' });
-          console.log('🔐 SMS sent, prepare result:', JSON.stringify(result));
-        } else if (strategy === 'totp') {
-          setTwoFactorStrategy('totp');
-        } else if (strategy) {
-          setTwoFactorStrategy(strategy as any);
-        }
-        setNeedsTwoFactor(true);
-        setError('');
-        setLoading(false);
-        return;
-      }
-
-      // Handle unexpected status
-      console.error('❌ Unexpected sign-in status:', completeSignIn.status);
-      const errorMsg = `Unable to complete sign in. Status: ${completeSignIn.status}. Please try again.`;
-      setError(errorMsg);
-      showModal('error', 'Error', errorMsg);
-
-    } catch (err: any) {
-      // Show friendly error message
-      console.log('🔴 Sign in error:', err);
-      console.log('🔴 Error details:', JSON.stringify(err, null, 2));
-      const errorMessage = getFriendlyErrorMessage(err);
-      setError(errorMessage);
-      showModal('error', 'Sign In Failed', errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onVerifyTwoFactor = async () => {
-    if (!isLoaded || !signIn) return;
-    if (!twoFactorCode || twoFactorCode.length < 6) {
-      setError('Please enter the 6-digit verification code.');
-      return;
-    }
-    setError('');
-    setLoading(true);
-    try {
-      const result = await signIn.attemptSecondFactor({
-        strategy: twoFactorStrategy,
-        code: twoFactorCode,
-      });
-      if (result.status === 'complete') {
-        await setActive({ session: result.createdSessionId });
-        router.replace('/(tabs)');
-      } else {
-        const errorMsg = `Verification incomplete. Status: ${result.status}`;
-        setError(errorMsg);
-        showModal('error', 'Verification Failed', errorMsg);
-      }
-    } catch (err: any) {
-      const errorMessage = getFriendlyErrorMessage(err);
-      setError(errorMessage || 'Invalid verification code. Please try again.');
-      showModal('error', 'Verification Failed', errorMessage || 'Invalid verification code. Please try again.');
-    } finally {
-      setLoading(false);
+      showModal(type, title, message);
     }
   };
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      style={styles.container}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <LinearGradient
           colors={['#5B94D3', '#11468F']}
           style={styles.header}
-          start={{x: 0, y: 0}}
-          end={{x: 1, y: 1}}>
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
           <View style={styles.logoContainer}>
             <TippaLogo size={60} />
           </View>
@@ -202,126 +116,96 @@ export default function SignInScreen() {
         </LinearGradient>
 
         <View style={styles.formContainer}>
-          {error ? (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
+          {/* Step indicator */}
+          <View style={styles.stepRow}>
+            <View style={[styles.stepDot, styles.stepDotActive]} />
+            <View style={[styles.stepLine, step === 'code' && styles.stepLineActive]} />
+            <View style={[styles.stepDot, step === 'code' && styles.stepDotActive]} />
+          </View>
 
-          {needsTwoFactor ? (
+          {step === 'phone' ? (
             <>
-              <View style={styles.twoFactorHeader}>
-                <Ionicons name="shield-checkmark" size={48} color="#5B94D3" />
-                <Text style={styles.twoFactorTitle}>Two-Factor Authentication</Text>
-                <Text style={styles.twoFactorSubtitle}>
-                  {twoFactorStrategy === 'totp'
-                    ? 'Enter the 6-digit code from your authenticator app.'
-                    : twoFactorStrategy === 'phone_code'
-                    ? 'A 6-digit code has been sent to your registered phone number.'
-                    : 'Enter the 6-digit verification code.'}
+              <Text style={styles.stepTitle}>Step 1 of 2</Text>
+              <Text style={styles.stepSubtitle}>Enter your registered phone number</Text>
+
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>Phone Number</Text>
+                <View style={styles.phoneWrapper}>
+                  <Text style={styles.phonePrefix}>🇿🇦</Text>
+                  <TextInput
+                    style={styles.phoneInput}
+                    placeholder="082 123 4567"
+                    placeholderTextColor="#9CA3AF"
+                    value={phone}
+                    onChangeText={setPhone}
+                    keyboardType="phone-pad"
+                    autoFocus
+                  />
+                </View>
+              </View>
+
+              <View style={styles.infoBox}>
+                <Ionicons name="information-circle-outline" size={18} color="#2563EB" />
+                <Text style={styles.infoText}>
+                  Use the phone number you registered with. Your manager will have given you an access code.
                 </Text>
               </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Verification Code</Text>
-                <TextInput
-                  style={[styles.input, styles.codeInput]}
-                  placeholder="000000"
-                  placeholderTextColor="#9CA3AF"
-                  value={twoFactorCode}
-                  onChangeText={(text) => setTwoFactorCode(text.replace(/[^0-9]/g, '').slice(0, 6))}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  autoFocus
-                  editable={!loading}
-                />
-              </View>
-
               <TouchableOpacity
-                style={[styles.button, loading && styles.disabledButton]}
-                onPress={onVerifyTwoFactor}
-                disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.buttonText}>Verify</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => {
-                  setNeedsTwoFactor(false);
-                  setTwoFactorCode('');
-                  setError('');
-                }}
-                disabled={loading}>
-                <Text style={styles.linkText}>Back to Sign In</Text>
+                style={[styles.button, phone.length < 9 && styles.buttonDisabled]}
+                onPress={handlePhoneNext}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.buttonText}>Next</Text>
+                <Ionicons name="arrow-forward" size={18} color="#fff" />
               </TouchableOpacity>
             </>
           ) : (
             <>
+              <Text style={styles.stepTitle}>Step 2 of 2</Text>
+              <Text style={styles.stepSubtitle}>Enter the 6-digit access code from your manager</Text>
+
               <View style={styles.inputContainer}>
-                <Text style={styles.label}>Email</Text>
+                <Text style={styles.label}>Access Code</Text>
                 <TextInput
-                  style={styles.input}
-                  placeholder="your@email.com"
+                  style={styles.codeInput}
+                  placeholder="000000"
                   placeholderTextColor="#9CA3AF"
-                  value={emailAddress}
-                  onChangeText={setEmailAddress}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!loading}
+                  value={accessCode}
+                  onChangeText={t => setAccessCode(t.replace(/[^0-9]/g, '').slice(0, 6))}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  autoFocus
                 />
               </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Password</Text>
-                <View style={styles.passwordContainer}>
-                  <TextInput
-                    style={styles.passwordInput}
-                    placeholder="Enter your password"
-                    placeholderTextColor="#9CA3AF"
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry={!showPassword}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    editable={!loading}
-                  />
-                  <TouchableOpacity
-                    style={styles.eyeIcon}
-                    onPress={() => setShowPassword(!showPassword)}
-                    disabled={loading}>
-                    <Ionicons
-                      name={showPassword ? 'eye-off' : 'eye'}
-                      size={24}
-                      color="#6B7280"
-                    />
-                  </TouchableOpacity>
-                </View>
+              <View style={styles.infoBox}>
+                <Ionicons name="key-outline" size={18} color="#2563EB" />
+                <Text style={styles.infoText}>
+                  Your access code is provided by your manager when your account is set up. Each code can only be used once.
+                </Text>
               </View>
 
               <TouchableOpacity
-                style={[styles.button, loading && styles.disabledButton]}
-                onPress={onSignInPress}
-                disabled={loading}>
+                style={[styles.button, (loading || accessCode.length !== 6) && styles.buttonDisabled]}
+                onPress={handleLogin}
+                disabled={loading || accessCode.length !== 6}
+                activeOpacity={0.8}
+              >
                 {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.buttonText}>Sign In</Text>
+                  <>
+                    <Text style={styles.buttonText}>Sign In</Text>
+                    <Ionicons name="log-in-outline" size={18} color="#fff" />
+                  </>
                 )}
               </TouchableOpacity>
 
-              <View style={styles.footer}>
-                <Text style={styles.footerText}>Don't have an account? </Text>
-                <Link href="/(auth)/sign-up" asChild>
-                  <TouchableOpacity disabled={loading}>
-                    <Text style={styles.linkText}>Sign Up</Text>
-                  </TouchableOpacity>
-                </Link>
-              </View>
+              <TouchableOpacity style={styles.backButton} onPress={() => { setStep('phone'); setAccessCode(''); }}>
+                <Ionicons name="arrow-back" size={16} color="#5B94D3" />
+                <Text style={styles.backText}>Back</Text>
+              </TouchableOpacity>
             </>
           )}
         </View>
@@ -339,155 +223,60 @@ export default function SignInScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  scrollContainer: {
-    flexGrow: 1,
-  },
+  container:       { flex: 1, backgroundColor: '#F8F9FA' },
+  scrollContainer: { flexGrow: 1 },
   header: {
-    paddingTop: 60,
-    paddingBottom: 60,
-    paddingHorizontal: 24,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    alignItems: 'center',
+    paddingTop: 60, paddingBottom: 60, paddingHorizontal: 24,
+    borderBottomLeftRadius: 30, borderBottomRightRadius: 30, alignItems: 'center',
   },
-  logoContainer: {
-    marginBottom: 16,
+  logoContainer: { marginBottom: 16 },
+  title:    { fontSize: 36, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#FFFFFF', marginBottom: 8 },
+  subtitle: { fontSize: 16, fontFamily: 'Nunito-Regular', color: '#E0E7FF' },
+
+  formContainer: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
+
+  stepRow:         { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  stepDot:         { width: 12, height: 12, borderRadius: 6, backgroundColor: '#D1D5DB' },
+  stepDotActive:   { backgroundColor: '#5B94D3' },
+  stepLine:        { flex: 1, height: 2, backgroundColor: '#D1D5DB', marginHorizontal: 6 },
+  stepLineActive:  { backgroundColor: '#5B94D3' },
+
+  stepTitle:    { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#6B7280', marginBottom: 4 },
+  stepSubtitle: { fontSize: 18, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827', marginBottom: 24 },
+
+  inputContainer: { marginBottom: 20 },
+  label: { fontSize: 14, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#1A1A1A', marginBottom: 8 },
+
+  phoneWrapper: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB',
+    paddingHorizontal: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
-  title: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#E0E7FF',
-  },
-  formContainer: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 40,
-  },
-  errorContainer: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
-  },
-  errorText: {
-    color: '#DC2626',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 2},
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 2},
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  passwordInput: {
-    flex: 1,
-    padding: 16,
-    fontSize: 16,
-  },
-  eyeIcon: {
-    padding: 16,
-  },
-  button: {
-    backgroundColor: '#5B94D3',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 16,
-    shadowColor: '#5B94D3',
-    shadowOffset: {width: 0, height: 4},
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 32,
-  },
-  footerText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  linkText: {
-    fontSize: 14,
-    color: '#5B94D3',
-    fontWeight: '600',
-  },
-  twoFactorHeader: {
-    alignItems: 'center' as const,
-    marginBottom: 24,
-  },
-  twoFactorTitle: {
-    fontSize: 20,
-    fontWeight: '700' as const,
-    color: '#1A1A1A',
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  twoFactorSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center' as const,
-    lineHeight: 20,
-  },
+  phonePrefix: { fontSize: 20, fontFamily: 'Nunito-Regular', marginRight: 10 },
+  phoneInput:  { flex: 1, fontSize: 16, fontFamily: 'Nunito-Regular', paddingVertical: 14, color: '#111827' },
+
   codeInput: {
-    textAlign: 'center' as const,
-    fontSize: 24,
-    fontWeight: '700' as const,
-    letterSpacing: 8,
+    backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB',
+    padding: 16, fontSize: 32, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827',
+    textAlign: 'center', letterSpacing: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
-  backButton: {
-    alignItems: 'center' as const,
-    marginTop: 20,
-    padding: 12,
+
+  infoBox: {
+    flexDirection: 'row', gap: 10, backgroundColor: '#EFF6FF',
+    borderRadius: 12, padding: 14, marginBottom: 24,
   },
+  infoText: { flex: 1, fontSize: 13, fontFamily: 'Nunito-Regular', color: '#3B82F6', lineHeight: 20 },
+
+  button: {
+    backgroundColor: '#5B94D3', borderRadius: 12, padding: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    shadowColor: '#5B94D3', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
+  },
+  buttonDisabled: { backgroundColor: '#9CA3AF', shadowOpacity: 0 },
+  buttonText:     { color: '#FFFFFF', fontSize: 16, fontWeight: '700', fontFamily: 'Nunito-Bold' },
+
+  backButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 20, padding: 12 },
+  backText:   { color: '#5B94D3', fontSize: 14, fontWeight: '600', fontFamily: 'Nunito-SemiBold' },
 });

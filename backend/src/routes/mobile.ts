@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
+import { mobileAuth } from '../middleware/mobileAuth'
 
 const router = Router()
 
@@ -408,10 +409,10 @@ router.get('/mobile/guard/:clerkUserId/transactions', async (req: Request, res: 
           id: t.id,
           type: t.type,
           amount: t.amount,
-          description: null,
-          status: 'COMPLETED',
-          reference: null,
-          balance: null,
+          description: t.description,
+          status: t.status || 'COMPLETED',
+          reference: t.reference,
+          balance: t.balance,
           date: t.createdAt.toISOString().split('T')[0],
           time: t.createdAt.toISOString().split('T')[1].split('.')[0],
           createdAt: t.createdAt.toISOString()
@@ -533,11 +534,18 @@ router.post('/mobile/payout/request', async (req: Request, res: Response) => {
       })
     }
 
-    // Validate amount (minimum R1)
-    if (amount < 1) {
+    // Validate amount (minimum R10, must be whole rands)
+    if (amount < 10) {
       return res.status(400).json({
         success: false,
-        error: 'Minimum payout amount is R1'
+        error: 'Minimum payout amount is R10'
+      })
+    }
+
+    if (amount % 10 !== 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payout amount must be a multiple of R10 (e.g. R10, R20, R30...)'
       })
     }
 
@@ -578,16 +586,16 @@ router.post('/mobile/payout/request', async (req: Request, res: Response) => {
       })
     }
 
-    // Check if guard is active (skip in sandbox mode)
-    if (!IS_SANDBOX && guard.status !== 'ACTIVE') {
+    // Check if guard is active
+    if (guard.status !== 'ACTIVE') {
       return res.status(400).json({
         success: false,
         error: 'Guard account is not active'
       })
     }
 
-    // Check if guard has sufficient balance (skip in sandbox mode)
-    if (!IS_SANDBOX && guard.balance < amount) {
+    // Check if guard has sufficient balance
+    if (guard.balance < amount) {
       return res.status(400).json({
         success: false,
         error: 'Insufficient balance',
@@ -596,8 +604,8 @@ router.post('/mobile/payout/request', async (req: Request, res: Response) => {
       })
     }
 
-    // Check for existing pending payout requests (skip in sandbox mode)
-    if (!IS_SANDBOX) {
+    // Check for existing pending payout requests — always enforced
+    {
       const existingPending = await prisma.payout.findFirst({
         where: {
           guardId: guard.id,
@@ -667,13 +675,20 @@ router.get('/mobile/payout/requests', async (req: Request, res: Response) => {
 
     console.log('🔍 Fetching payout requests for guard:', guardId)
 
-    // Find guard by guardId or database id (supports both formats)
+    // Find guard by guardId field first
     let guard = await prisma.carGuard.findUnique({
       where: { guardId: guardId as string }
     })
 
-    // If not found by guardId, try by database id
+    // If not found, try by clerkUserId
     if (!guard) {
+      guard = await prisma.carGuard.findFirst({
+        where: { clerkUserId: guardId as string }
+      })
+    }
+
+    // If still not found, try by MongoDB id (only if it looks like a valid ObjectId)
+    if (!guard && /^[a-f\d]{24}$/i.test(guardId as string)) {
       guard = await prisma.carGuard.findUnique({
         where: { id: guardId as string }
       })
@@ -878,6 +893,282 @@ router.post('/admin/guards/:guardId/generate-access-code', async (req: Request, 
       success: false,
       error: 'Failed to generate access code'
     })
+  }
+})
+
+// ==================== JWT-AUTHENTICATED MOBILE ROUTES ====================
+// These replace the clerkUserId-based routes. Identity comes from the JWT.
+
+/**
+ * GET /api/mobile/me
+ * Get the logged-in guard's profile
+ */
+router.get('/mobile/me', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guard = await prisma.carGuard.findUnique({
+      where: { id: req.guard!.guardId },
+      include: { location: { select: { id: true, name: true, address: true } } }
+    })
+
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    return res.json({
+      success: true,
+      data: {
+        id: guard.id,
+        guardId: guard.guardId,
+        name: guard.name,
+        surname: guard.surname,
+        fullName: `${guard.name} ${guard.surname}`,
+        phone: guard.phone,
+        email: null,
+        balance: guard.balance,
+        totalEarnings: guard.lifetimeEarnings,
+        status: guard.status,
+        rating: guard.rating,
+        qrCode: guard.qrCode,
+        qrCodeUrl: guard.qrCodeUrl || null,
+        location: guard.location || null,
+        bankName: guard.bankName,
+        accountNumber: guard.accountNumber,
+        accountHolder: guard.accountHolder,
+        branchCode: guard.branchCode,
+        accountType: guard.accountType,
+      }
+    })
+  } catch (error) {
+    console.error('❌ Error fetching guard profile:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch profile' })
+  }
+})
+
+/**
+ * GET /api/mobile/me/transactions
+ * Get the logged-in guard's transactions
+ */
+router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const { limit = '50', offset = '0', type } = req.query
+    const guardId = req.guard!.guardId
+
+    const where: any = { guardId }
+    if (type) where.type = String(type).toUpperCase()
+
+    const transactions = await prisma.transaction.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: parseInt(limit as string),
+      skip: parseInt(offset as string),
+    })
+
+    return res.json({
+      success: true,
+      data: {
+        transactions: transactions.map(t => ({
+          id: t.id,
+          type: t.type,
+          amount: t.amount,
+          description: t.description,
+          status: t.status || 'COMPLETED',
+          reference: t.reference,
+          balance: t.balance,
+          date: t.createdAt.toISOString().split('T')[0],
+          time: t.createdAt.toISOString().split('T')[1].split('.')[0],
+          createdAt: t.createdAt.toISOString(),
+        }))
+      }
+    })
+  } catch (error) {
+    console.error('❌ Error fetching transactions:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch transactions' })
+  }
+})
+
+/**
+ * GET /api/mobile/me/payouts
+ * Get the logged-in guard's payout requests
+ */
+router.get('/mobile/me/payouts', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const { status, limit = '50' } = req.query
+    const guardId = req.guard!.guardId
+
+    const where: any = { guardId }
+    if (status && status !== 'all') where.status = String(status).toUpperCase()
+
+    const payouts = await prisma.payout.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: parseInt(limit as string),
+    })
+
+    return res.json({
+      success: true,
+      data: payouts.map(p => ({
+        id: p.id,
+        payoutId: p.payoutId || `PAY-${p.id.slice(-8).toUpperCase()}`,
+        amount: p.amount,
+        status: p.status,
+        method: p.method,
+        requestedAt: p.createdAt.toISOString(),
+        approvedAt: p.approvedAt?.toISOString() || null,
+        processedAt: p.processedAt?.toISOString() || null,
+        completedAt: p.completedAt?.toISOString() || null,
+        notes: p.notes,
+        adminNotes: p.adminNotes,
+        rejectionReason: p.rejectionReason,
+      }))
+    })
+  } catch (error) {
+    console.error('❌ Error fetching payouts:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch payouts' })
+  }
+})
+
+/**
+ * POST /api/mobile/me/payout/request
+ * Submit a new payout request
+ */
+router.post('/mobile/me/payout/request', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const { amount, notes } = req.body
+    const guardId = req.guard!.guardId
+
+    if (!amount) return res.status(400).json({ success: false, error: 'Amount is required' })
+    if (amount < 10) return res.status(400).json({ success: false, error: 'Minimum payout amount is R10' })
+    if (amount % 10 !== 0) return res.status(400).json({ success: false, error: 'Payout amount must be a multiple of R10' })
+
+    const guard = await prisma.carGuard.findUnique({ where: { id: guardId } })
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+    if (guard.status !== 'ACTIVE') return res.status(400).json({ success: false, error: 'Guard account is not active' })
+    if (guard.balance < amount) return res.status(400).json({ success: false, error: 'Insufficient balance', currentBalance: guard.balance })
+
+    const existing = await prisma.payout.findFirst({ where: { guardId, status: 'PENDING' } })
+    if (existing) return res.status(400).json({ success: false, error: 'You already have a pending payout request. Please wait for it to be processed.' })
+
+    const payoutId = `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+    const payout = await prisma.payout.create({
+      data: { payoutId, guardId, amount, status: 'PENDING', notes: notes || null }
+    })
+
+    return res.status(201).json({
+      success: true,
+      message: 'Payout request submitted successfully',
+      data: {
+        payoutId: payout.payoutId,
+        amount: payout.amount,
+        status: payout.status,
+        requestedAt: payout.createdAt.toISOString(),
+        currentBalance: guard.balance,
+        note: 'Your request is pending admin approval. Balance will be deducted upon approval.'
+      }
+    })
+  } catch (error) {
+    console.error('❌ Error creating payout request:', error)
+    return res.status(500).json({ success: false, error: 'Failed to create payout request' })
+  }
+})
+
+/**
+ * PUT /api/mobile/me/profile
+ * Update the logged-in guard's profile
+ */
+router.put('/mobile/me/profile', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+    const { name, surname, phone, bankName, accountNumber, accountHolder, branchCode, accountType } = req.body
+
+    const updated = await prisma.carGuard.update({
+      where: { id: guardId },
+      data: {
+        ...(name && { name }),
+        ...(surname && { surname }),
+        ...(phone && { phone }),
+        ...(bankName !== undefined && { bankName }),
+        ...(accountNumber !== undefined && { accountNumber }),
+        ...(accountHolder !== undefined && { accountHolder }),
+        ...(branchCode !== undefined && { branchCode }),
+        ...(accountType !== undefined && { accountType }),
+      }
+    })
+
+    return res.json({
+      success: true,
+      data: {
+        id: updated.id,
+        guardId: updated.guardId,
+        name: updated.name,
+        surname: updated.surname,
+        fullName: `${updated.name} ${updated.surname}`,
+        phone: updated.phone,
+        balance: updated.balance,
+        bankName: updated.bankName,
+        accountNumber: updated.accountNumber,
+        accountHolder: updated.accountHolder,
+        branchCode: updated.branchCode,
+        accountType: updated.accountType,
+      }
+    })
+  } catch (error) {
+    console.error('❌ Error updating profile:', error)
+    return res.status(500).json({ success: false, error: 'Failed to update profile' })
+  }
+})
+
+/**
+ * GET /api/mobile/me/auto-payout-settings
+ * Returns the effective auto-payout settings for the logged-in guard.
+ * Reads global settings from Settings collection, then checks per-guard override on CarGuard.
+ */
+router.get('/mobile/me/auto-payout-settings', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+
+    const guard = await prisma.carGuard.findUnique({
+      where: { id: guardId },
+      select: {
+        balance: true,
+        autoPayoutEnabled: true,
+        autoPayoutThreshold: true,
+      }
+    })
+
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    // Load global settings
+    const [enabledSetting, thresholdSetting, modeSetting] = await Promise.all([
+      prisma.settings.findUnique({ where: { key: 'auto_payout_enabled' } }),
+      prisma.settings.findUnique({ where: { key: 'auto_payout_threshold' } }),
+      prisma.settings.findUnique({ where: { key: 'auto_payout_mode' } }),
+    ])
+
+    const globalEnabled = enabledSetting?.value === 'true'
+    const globalThreshold = thresholdSetting ? parseFloat(thresholdSetting.value) : 500
+    const mode = modeSetting?.value || 'SEMI_AUTO'
+
+    // Per-guard override takes precedence if set
+    const isCustom = guard.autoPayoutEnabled !== null || guard.autoPayoutThreshold !== null
+    const effectiveEnabled = guard.autoPayoutEnabled !== null ? guard.autoPayoutEnabled : globalEnabled
+    const effectiveThreshold = guard.autoPayoutThreshold !== null && guard.autoPayoutThreshold !== undefined
+      ? guard.autoPayoutThreshold
+      : globalThreshold
+
+    const amountUntilAutoPayout = Math.max(0, effectiveThreshold - guard.balance)
+
+    return res.json({
+      success: true,
+      data: {
+        enabled: effectiveEnabled,
+        threshold: effectiveThreshold,
+        mode,
+        isCustom,
+        currentBalance: guard.balance,
+        amountUntilAutoPayout,
+      }
+    })
+  } catch (error) {
+    console.error('❌ Error fetching auto-payout settings:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch auto-payout settings' })
   }
 })
 

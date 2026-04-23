@@ -5,1193 +5,531 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Modal,
   TextInput,
-  Alert,
-  Switch,
-  TouchableWithoutFeedback,
-  Platform,
-  StatusBar,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useUser } from '@clerk/clerk-expo';
-import * as Clipboard from 'expo-clipboard';
-import { formatCurrency, formatDate } from '../../data/mockData';
+import { formatCurrency } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
-import {
-  getPayouts,
-  Payout,
-  purchaseVoucher,
-  requestPayout,
-  PayoutRequest,
-  getPayoutRequests,
-  VoucherData,
-} from '../../services/mobileApiService';
+import { requestPayout, getPayoutRequests, getAutoPayoutSettings, PayoutRequest, AutoPayoutSettings } from '../../services/mobileApiService';
+import { useAuth } from '../../contexts/AuthContext';
+import { AlertModal } from '../../components/AlertModal';
 
-// Quick amount buttons for payout
-const QUICK_AMOUNTS = [50, 100, 200, 500];
+const MIN_PAYOUT = 10;
+const QUICK_AMOUNTS = [10, 20, 50, 100, 200, 500];
+
+type AlertType = 'error' | 'success' | 'info' | 'warning';
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  PENDING:    { label: 'Pending — awaiting admin review',    color: '#D97706', bg: '#FEF3C7', icon: 'time-outline' },
+  APPROVED:   { label: 'Approved — eWallet being prepared',  color: '#2563EB', bg: '#DBEAFE', icon: 'checkmark-circle-outline' },
+  PROCESSING: { label: 'Processing',                         color: '#2563EB', bg: '#DBEAFE', icon: 'sync-outline' },
+  COMPLETED:  { label: 'eWallet Sent',                       color: '#059669', bg: '#D1FAE5', icon: 'checkmark-done-outline' },
+  REJECTED:   { label: 'Declined',                           color: '#DC2626', bg: '#FEE2E2', icon: 'close-circle-outline' },
+  CANCELLED:  { label: 'Declined',                           color: '#DC2626', bg: '#FEE2E2', icon: 'close-circle-outline' },
+  FAILED:     { label: 'Could not be sent — balance refunded', color: '#EA580C', bg: '#FFF7ED', icon: 'alert-circle-outline' },
+};
 
 export default function PayoutsScreen() {
-  const { user } = useUser();
-  const { guardData, isLoading: guardLoading, updateBalance, refreshGuardData } = useGuard();
+  const { guard: authGuard, token } = useAuth();
+  const { guardData, isLoading: guardLoading } = useGuard();
+
+  const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [payouts, setPayouts] = useState<Payout[]>([]);
-  const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>([]);
+  const [requests, setRequests]     = useState<PayoutRequest[]>([]);
+  const [error, setError]           = useState<string | null>(null);
+  const [autoPayoutSettings, setAutoPayoutSettings] = useState<AutoPayoutSettings | null>(null);
 
-  // Modal states
-  const [showRequestModal, setShowRequestModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showVoucherResultModal, setShowVoucherResultModal] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showResultModal, setShowResultModal] = useState(false);
+  // Request form state
+  const [amount, setAmount]           = useState('');
+  const [notes, setNotes]             = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showForm, setShowForm]       = useState(false);
 
-  // Payout request state
-  const [payoutMethod, setPayoutMethod] = useState<'voucher' | 'bank_transfer' | null>(null);
-  const [amount, setAmount] = useState('');
-  const [notes, setNotes] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
+  // Alert modal
+  const [modal, setModal] = useState<{ visible: boolean; type: AlertType; title: string; message: string }>({
+    visible: false, type: 'success', title: '', message: '',
+  });
 
-  // Result state (success/error feedback)
-  const [resultType, setResultType] = useState<'success' | 'error'>('success');
-  const [resultTitle, setResultTitle] = useState('');
-  const [resultMessage, setResultMessage] = useState('');
+  const showModal = (type: AlertType, title: string, message: string) =>
+    setModal({ visible: true, type, title, message });
 
-  // Voucher result state
-  const [voucherResult, setVoucherResult] = useState<VoucherData | null>(null);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const balance = guardData?.balance ?? 0;
 
-  // Settings state
-  const [autoPayoutEnabled, setAutoPayoutEnabled] = useState(true);
-  const [autoPayoutThreshold, setAutoPayoutThreshold] = useState('500');
+  // ─── Load requests ────────────────────────────────────────────────────────
+  const loadRequests = useCallback(async () => {
+    if (!authGuard?.guardPublicId) return;
+    try {
+      const [payoutsRes, autoRes] = await Promise.all([
+        getPayoutRequests(authGuard.guardPublicId),
+        token ? getAutoPayoutSettings(token) : Promise.resolve({ success: false }),
+      ]);
+      if (payoutsRes.success && payoutsRes.data) setRequests(payoutsRes.data);
+      if (autoRes.success && autoRes.data) setAutoPayoutSettings(autoRes.data);
+    } catch (e) {
+      console.error('loadRequests error:', e);
+    }
+  }, [authGuard?.guardPublicId, token]);
 
-  // Filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
-  const [activeTab, setActiveTab] = useState<'history' | 'requests'>('history');
-  const itemsPerPage = 5;
-
-  const payoutThreshold = 500.00;
-  const nextPayoutDate = '2025-09-05';
-
-  // Load payouts when guard data is available
   useEffect(() => {
-    if (guardData && !guardLoading && user?.id) {
-      loadData();
+    if (!guardLoading && guardData) {
+      loadRequests().finally(() => setLoading(false));
     } else if (!guardLoading && !guardData) {
       setError('Guard profile not found. Please link your account.');
       setLoading(false);
     }
-  }, [guardData, guardLoading, user]);
+  }, [guardData, guardLoading]);
 
-  const loadData = async () => {
-    if (!user?.id || !guardData) {
-      setError('Not authenticated. Please sign in again.');
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Fetch payouts (main data)
-      const payoutsResponse = await getPayouts(user.id);
-
-      if (payoutsResponse.success) {
-        setPayouts(payoutsResponse.data || []);
-      } else {
-        setError('Failed to load payout data');
-      }
-
-      // Try to fetch payout requests (may not be implemented on backend yet)
-      try {
-        const requestsResponse = await getPayoutRequests(guardData.guardId);
-        if (requestsResponse.success) {
-          setPayoutRequests(requestsResponse.data || []);
-        }
-        // Silently fail if endpoint doesn't exist yet
-      } catch (requestErr) {
-        console.log('Payout requests endpoint not available yet');
-        setPayoutRequests([]);
-      }
-    } catch (err) {
-      setError('Failed to load data. Please check your connection.');
-      console.error('Error loading payouts:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    Promise.all([
-      loadData(),
-      user?.id ? refreshGuardData(user.id) : Promise.resolve(),
-    ]).finally(() => setRefreshing(false));
-  }, [user?.id]);
+    await loadRequests();
+    setRefreshing(false);
+  }, [loadRequests]);
 
-  const handleSelectMethod = (method: 'voucher' | 'bank_transfer') => {
-    setPayoutMethod(method);
+  // ─── Validation ───────────────────────────────────────────────────────────
+  const parsedAmount = parseFloat(amount) || 0;
+
+  const maxWithdrawable = Math.floor(balance / 10) * 10;
+
+  const getAmountError = (): string | null => {
+    if (!amount) return null;
+    if (parsedAmount < MIN_PAYOUT) return `Minimum payout is ${formatCurrency(MIN_PAYOUT)}`;
+    if (parsedAmount > balance) {
+      return maxWithdrawable >= MIN_PAYOUT
+        ? `You can withdraw up to ${formatCurrency(maxWithdrawable)}. The remaining ${formatCurrency(balance - maxWithdrawable)} stays in your account.`
+        : `Insufficient balance. You need at least ${formatCurrency(MIN_PAYOUT)} to request a payout.`;
+    }
+    if (parsedAmount % 10 !== 0) {
+      const roundedDown = Math.floor(parsedAmount / 10) * 10;
+      return roundedDown >= MIN_PAYOUT
+        ? `Payouts must be in whole multiples of R10. You can withdraw ${formatCurrency(roundedDown)} — the remaining ${formatCurrency(parsedAmount - roundedDown)} stays in your account.`
+        : `Payouts must be in whole multiples of R10 (e.g. R10, R20, R30...)`;
+    }
+    return null;
   };
 
-  const handleQuickAmount = (quickAmount: number) => {
-    setAmount(quickAmount.toString());
-  };
+  const amountError = getAmountError();
+  const canSubmit   = parsedAmount >= MIN_PAYOUT && parsedAmount <= balance && parsedAmount % 10 === 0 && !isSubmitting;
 
-  const validateAmount = (): boolean => {
-    const numAmount = parseFloat(amount);
+  const hasPending = requests.some(r => r.status === 'PENDING' || r.status === 'PROCESSING');
 
-    if (!amount || isNaN(numAmount) || numAmount <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
-      return false;
-    }
+  // ─── Submit ───────────────────────────────────────────────────────────────
+  const handleSubmit = async () => {
+    if (!authGuard?.guardPublicId || !canSubmit) return;
 
-    if (!guardData) {
-      Alert.alert('Error', 'Guard data not loaded. Please try again.');
-      return false;
-    }
-
-    if (numAmount > guardData.balance) {
-      Alert.alert('Insufficient Balance', 'You cannot request more than your available balance');
-      return false;
-    }
-
-    if (payoutMethod === 'voucher' && numAmount < 5) {
-      Alert.alert('Minimum Amount', 'Minimum voucher amount is R5');
-      return false;
-    }
-
-    if (payoutMethod === 'bank_transfer' && numAmount < 50) {
-      Alert.alert('Minimum Amount', 'Minimum bank transfer amount is R50');
-      return false;
-    }
-
-    return true;
-  };
-
-  const handleProceedToConfirm = () => {
-    if (!payoutMethod) {
-      Alert.alert('Error', 'Please select a payout method');
+    if (hasPending) {
+      showModal('warning', 'Request Already Pending',
+        'You have a payout request that is still being processed. Please wait for it to be completed before submitting a new one.');
       return;
     }
 
-    if (!validateAmount()) return;
+    if (parsedAmount > balance) {
+      showModal('error', 'Insufficient Balance',
+        `You can only request up to ${formatCurrency(balance)}.`);
+      return;
+    }
 
-    setShowRequestModal(false);
-    setShowConfirmModal(true);
-  };
-
-  const handleConfirmPayout = async () => {
-    if (!guardData || !payoutMethod) return;
-
-    setIsProcessing(true);
-    const numAmount = parseFloat(amount);
-
+    setIsSubmitting(true);
     try {
-      if (payoutMethod === 'voucher') {
-        // Instant voucher purchase
-        const result = await purchaseVoucher(guardData.guardId, numAmount, notes || undefined);
+      const res = await requestPayout(authGuard.guardPublicId, parsedAmount, notes.trim() || undefined);
 
-        if (result.success && result.data) {
-          // Update local balance
-          await updateBalance(result.data.newBalance);
-
-          // Store voucher result for display
-          if (result.data.voucher) {
-            setVoucherResult(result.data.voucher);
-          }
-
-          setShowConfirmModal(false);
-          setShowVoucherResultModal(true);
-
-          // Refresh data
-          loadData();
-        } else {
-          setShowConfirmModal(false);
-          setResultType('error');
-          setResultTitle('Voucher Error');
-          setResultMessage(result.error || 'Failed to purchase voucher');
-          setShowResultModal(true);
-        }
+      if (res.success) {
+        showModal('success', 'Request Submitted',
+          `Your payout request of ${formatCurrency(parsedAmount)} has been submitted and is pending admin approval. You will be notified once it is processed.`);
+        setAmount('');
+        setNotes('');
+        setShowForm(false);
+        await loadRequests();
       } else {
-        // Bank transfer request (requires admin approval)
-        const result = await requestPayout(guardData.guardId, numAmount, notes || undefined);
-
-        setShowConfirmModal(false);
-
-        if (result.success && result.data) {
-          resetForm();
-          setResultType('success');
-          setResultTitle('Request Submitted');
-          setResultMessage('Your bank transfer request has been submitted for admin approval. You will be notified when it is processed.');
-          setShowResultModal(true);
-          loadData();
-        } else {
-          setResultType('error');
-          setResultTitle('Request Failed');
-          setResultMessage(result.error || 'Failed to submit payout request');
-          setShowResultModal(true);
-        }
+        showModal('error', 'Request Failed', res.error || 'Failed to submit payout request. Please try again.');
       }
-    } catch (err) {
-      console.error('Payout error:', err);
-      setShowConfirmModal(false);
-      setResultType('error');
-      setResultTitle('Error');
-      setResultMessage('Something went wrong. Please try again.');
-      setShowResultModal(true);
+    } catch {
+      showModal('error', 'Request Failed', 'Something went wrong. Please check your connection and try again.');
     } finally {
-      setIsProcessing(false);
+      setIsSubmitting(false);
     }
   };
 
-  const resetForm = () => {
-    setAmount('');
-    setNotes('');
-    setPayoutMethod(null);
-  };
-
-  const handleCopyToClipboard = async (text: string, field: string) => {
-    await Clipboard.setStringAsync(text);
-    setCopiedField(field);
-    setTimeout(() => setCopiedField(null), 2000);
-  };
-
-  const formatVoucherPin = (pin: string): string => {
-    // Format as XXXX XXXX XXXX XXXX
-    return pin.replace(/(.{4})/g, '$1 ').trim();
-  };
-
-  const getStatusColor = (status: string) => {
-    const statusLower = status.toLowerCase();
-    switch (statusLower) {
-      case 'completed':
-        return 'text-green-600 bg-green-50';
-      case 'processing':
-      case 'approved':
-        return 'text-yellow-600 bg-yellow-50';
-      case 'pending':
-        return 'text-blue-600 bg-blue-50';
-      case 'failed':
-      case 'rejected':
-        return 'text-red-600 bg-red-50';
-      default:
-        return 'text-gray-600 bg-gray-50';
-    }
-  };
-
-  const getPayoutIcon = (type: string) => {
-    switch (type) {
-      case 'bank_transfer':
-      case 'BANK_TRANSFER':
-        return 'business';
-      case 'cash':
-      case 'VOUCHER':
-        return 'card';
-      case 'airtime':
-        return 'phone-portrait';
-      case 'electricity':
-        return 'flash';
-      case 'groceries':
-        return 'cart';
-      default:
-        return 'wallet';
-    }
-  };
-
-  const renderPayout = ({ item }: { item: Payout }) => {
-    const statusColors = getStatusColor(item.status);
-
+  // ─── Render ───────────────────────────────────────────────────────────────
+  if (loading) {
     return (
-      <TouchableOpacity className="p-4">
-        <View className="flex-row items-center justify-between mb-2">
-          <View className="flex-row items-center flex-1">
-            <View style={{ backgroundColor: '#5B94D333' }} className="w-10 h-10 rounded-full items-center justify-center mr-3">
-              <Ionicons name={getPayoutIcon(item.type) as any} size={20} color="#5B94D3" />
-            </View>
-            <View className="flex-1">
-              <Text className="text-base font-semibold text-gray-900">
-                {item.type.replace(/_/g, ' ').split(' ').map(word =>
-                  word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-                ).join(' ')}
-              </Text>
-              <Text className="text-xs text-gray-500">
-                {item.voucherNumber || item.reference || 'No reference'}
-              </Text>
-            </View>
-          </View>
-          <View className={`px-3 py-1 rounded-full ${statusColors.split(' ')[1]}`}>
-            <Text className={`text-xs font-medium capitalize ${statusColors.split(' ')[0]}`}>
-              {item.status}
-            </Text>
-          </View>
-        </View>
-
-        <View className="flex-row justify-between items-center">
-          <View>
-            <Text className="text-xs text-gray-500">Request Date</Text>
-            <Text className="text-sm text-gray-700">{formatDate(item.requestDate)}</Text>
-          </View>
-          <View className="items-end">
-            <Text className="text-xs text-gray-500">Amount</Text>
-            <Text className="text-lg font-bold text-gray-900">
-              {formatCurrency(item.amount)}
-            </Text>
-          </View>
-        </View>
-      </TouchableOpacity>
+      <SafeAreaView style={styles.centered}>
+        <ActivityIndicator size="large" color="#5B94D3" />
+        <Text style={styles.loadingText}>Loading payouts...</Text>
+      </SafeAreaView>
     );
-  };
+  }
 
-  const renderPayoutRequest = ({ item }: { item: PayoutRequest }) => {
-    const statusColors = getStatusColor(item.status);
-    const hasVoucher = item.status === 'COMPLETED' && item.voucherPin;
-
+  if (error) {
     return (
-      <TouchableOpacity
-        className="p-4"
-        onPress={() => {
-          if (hasVoucher && item.voucherPin) {
-            setVoucherResult({
-              pin: item.voucherPin,
-              serialNumber: item.voucherSerial || '',
-              expiryDate: item.voucherExpiry || '',
-              amount: item.amount,
-              transactionId: item.id,
-              reference: item.payoutId,
-            });
-            setShowVoucherResultModal(true);
-          }
-        }}
-      >
-        <View className="flex-row items-center justify-between mb-2">
-          <View className="flex-row items-center flex-1">
-            <View style={{ backgroundColor: item.method === 'VOUCHER' ? '#10B98133' : '#5B94D333' }} className="w-10 h-10 rounded-full items-center justify-center mr-3">
-              <Ionicons
-                name={item.method === 'VOUCHER' ? 'card' : 'business'}
-                size={20}
-                color={item.method === 'VOUCHER' ? '#10B981' : '#5B94D3'}
-              />
-            </View>
-            <View className="flex-1">
-              <Text className="text-base font-semibold text-gray-900">
-                {item.method === 'VOUCHER' ? '1Voucher' : 'Bank Transfer'}
-              </Text>
-              <Text className="text-xs text-gray-500">
-                {item.payoutId}
-              </Text>
-            </View>
-          </View>
-          <View className={`px-3 py-1 rounded-full ${statusColors.split(' ')[1]}`}>
-            <Text className={`text-xs font-medium ${statusColors.split(' ')[0]}`}>
-              {item.status}
-            </Text>
-          </View>
-        </View>
-
-        <View className="flex-row justify-between items-center">
-          <View>
-            <Text className="text-xs text-gray-500">Requested</Text>
-            <Text className="text-sm text-gray-700">{formatDate(item.requestedAt)}</Text>
-          </View>
-          <View className="items-end">
-            <Text className="text-xs text-gray-500">Amount</Text>
-            <Text className="text-lg font-bold text-gray-900">
-              {formatCurrency(item.amount)}
-            </Text>
-          </View>
-        </View>
-
-        {item.rejectionReason && (
-          <View className="mt-2 p-2 bg-red-50 rounded-lg">
-            <Text className="text-xs text-red-600">Rejected: {item.rejectionReason}</Text>
-          </View>
-        )}
-
-        {hasVoucher && (
-          <View className="mt-2 p-2 bg-green-50 rounded-lg flex-row items-center">
-            <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-            <Text className="text-xs text-green-600 ml-1">Tap to view voucher PIN</Text>
-          </View>
-        )}
-      </TouchableOpacity>
+      <SafeAreaView style={styles.centered}>
+        <Ionicons name="alert-circle-outline" size={48} color="#DC2626" />
+        <Text style={styles.errorText}>{error}</Text>
+      </SafeAreaView>
     );
-  };
-
-  // Filter and pagination logic for payouts
-  const filteredPayouts = payouts.filter(payout => {
-    const matchesSearch = (payout.voucherNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         payout.type.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesStatus = selectedStatus === 'all' || payout.status.toLowerCase() === selectedStatus;
-    return matchesSearch && matchesStatus;
-  });
-
-  // Filter payout requests
-  const filteredRequests = payoutRequests.filter(request => {
-    const matchesSearch = request.payoutId.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = selectedStatus === 'all' || request.status.toLowerCase() === selectedStatus;
-    return matchesSearch && matchesStatus;
-  });
-
-  const currentItems = activeTab === 'history' ? filteredPayouts : filteredRequests;
-  const totalPages = Math.ceil(currentItems.length / itemsPerPage);
-  const paginatedItems = currentItems.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  const getStatusBarHeight = () => {
-    if (Platform.OS === 'ios') {
-      return StatusBar.currentHeight || 44;
-    }
-    return StatusBar.currentHeight || 24;
-  };
+  }
 
   return (
-    <SafeAreaView
-      className="flex-1 bg-gray-50"
-      style={{
-        paddingTop: Platform.OS === 'ios' ? getStatusBarHeight() : 0,
-        flex: 1,
-      }}
-    >
-      <TouchableWithoutFeedback onPress={() => setShowStatusDropdown(false)}>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          contentContainerStyle={{
-            paddingBottom: Platform.OS === 'ios' ? 120 : 100,
-            flexGrow: 1,
-          }}
-        >
-        {/* Header */}
-        <View className="bg-white px-4 py-6 border-b border-gray-100">
-          <View className="flex-row justify-between items-center">
-            <Text className="text-2xl font-bold text-gray-900">Payouts</Text>
-            <TouchableOpacity onPress={() => setShowSettingsModal(true)}>
-              <Ionicons name="settings-outline" size={24} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <ScrollView
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5B94D3" />}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 40 }}
+      >
+        {/* ── Header ── */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Payouts</Text>
+          <Text style={styles.headerSub}>Request a bank transfer to your account</Text>
         </View>
 
-        {/* Balance Card */}
-        <View className="mx-4 mt-4 mb-4">
-          <View className="bg-white rounded-xl p-6 shadow-sm">
-            {loading ? (
-              <View className="items-center justify-center py-6">
-                <ActivityIndicator size="large" color="#5B94D3" />
-              </View>
-            ) : error ? (
-              <View className="items-center justify-center py-6">
-                <Ionicons name="alert-circle-outline" size={40} color="#EF4444" />
-                <Text className="text-red-500 mt-2 text-center">{error}</Text>
-              </View>
-            ) : (
-              <View className="items-center mb-6">
-                <Text className="text-gray-500 text-sm mb-2">Available for Payout</Text>
-                <Text className="text-gray-900 text-4xl font-bold">
-                  {formatCurrency(guardData?.balance || 0)}
-                </Text>
-              </View>
-            )}
-
-            <TouchableOpacity
-              onPress={() => setShowRequestModal(true)}
-              style={{ backgroundColor: '#DEFF00' }}
-              className="rounded-lg py-4 items-center"
-            >
-              <Text style={{ color: '#11468F' }} className="font-semibold text-base">Request Payout</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Tabs */}
-        <View className="mx-4 mb-4">
-          <View className="bg-white rounded-xl p-1 flex-row shadow-sm">
-            <TouchableOpacity
-              onPress={() => { setActiveTab('history'); setCurrentPage(1); }}
-              className={`flex-1 py-3 rounded-lg items-center ${activeTab === 'history' ? 'bg-gray-100' : ''}`}
-            >
-              <Text className={`font-medium ${activeTab === 'history' ? 'text-gray-900' : 'text-gray-500'}`}>
-                History
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => { setActiveTab('requests'); setCurrentPage(1); }}
-              className={`flex-1 py-3 rounded-lg items-center ${activeTab === 'requests' ? 'bg-gray-100' : ''}`}
-            >
-              <View className="flex-row items-center">
-                <Text className={`font-medium ${activeTab === 'requests' ? 'text-gray-900' : 'text-gray-500'}`}>
-                  Requests
-                </Text>
-                {payoutRequests.filter(r => r.status === 'PENDING').length > 0 && (
-                  <View className="ml-2 bg-blue-500 rounded-full w-5 h-5 items-center justify-center">
-                    <Text className="text-white text-xs font-bold">
-                      {payoutRequests.filter(r => r.status === 'PENDING').length}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Search and Filters */}
-        <View className="mx-4 mb-4">
-          <View className="bg-white rounded-xl p-4 shadow-sm">
-            {/* Search Bar */}
-            <View className="bg-gray-50 rounded-lg px-4 py-3 mb-3 flex-row items-center">
-              <Ionicons name="search" size={20} color="#9CA3AF" />
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search..."
-                className="flex-1 ml-3 text-sm"
-              />
+        {/* ── Balance card ── */}
+        <View style={styles.balanceCard}>
+          <View style={styles.balanceRow}>
+            <View>
+              <Text style={styles.balanceLabel}>Available Balance</Text>
+              <Text style={styles.balanceAmount}>{formatCurrency(balance)}</Text>
             </View>
-
-            {/* Filter Dropdown */}
-            <View style={{
-              position: 'relative',
-              zIndex: showStatusDropdown ? 999 : 1,
-              marginBottom: showStatusDropdown ? 200 : 0
-            }}>
-              <Text className="text-sm font-medium text-gray-700 mb-2">Status Filter</Text>
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => setShowStatusDropdown(!showStatusDropdown)}
-                style={{
-                  backgroundColor: '#F9FAFB',
-                  borderRadius: 8,
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  borderWidth: 1,
-                  borderColor: '#E5E7EB',
-                }}
-              >
-                <Text style={{ color: '#374151', fontSize: 14 }}>
-                  {selectedStatus.charAt(0).toUpperCase() + selectedStatus.slice(1)}
-                </Text>
-                <Ionicons
-                  name={showStatusDropdown ? "chevron-up" : "chevron-down"}
-                  size={20}
-                  color="#6B7280"
-                />
-              </TouchableOpacity>
-
-              {showStatusDropdown && (
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    right: 0,
-                    backgroundColor: 'white',
-                    borderRadius: 8,
-                    marginTop: 4,
-                    zIndex: 1000,
-                    elevation: 15,
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.15,
-                    shadowRadius: 12,
-                    borderWidth: 1,
-                    borderColor: '#E5E7EB',
-                  }}
-                >
-                  {['all', 'pending', 'approved', 'processing', 'completed', 'rejected'].map((status, index) => (
-                    <TouchableOpacity
-                      key={status}
-                      activeOpacity={0.7}
-                      onPress={() => {
-                        setSelectedStatus(status);
-                        setShowStatusDropdown(false);
-                        setCurrentPage(1);
-                      }}
-                      style={{
-                        paddingHorizontal: 16,
-                        paddingVertical: 12,
-                        backgroundColor: selectedStatus === status ? '#F0FDF4' : 'white',
-                        borderBottomWidth: index < 5 ? 1 : 0,
-                        borderBottomColor: '#F3F4F6',
-                      }}
-                    >
-                      <Text style={{
-                        fontSize: 14,
-                        color: selectedStatus === status ? '#059669' : '#374151',
-                        fontWeight: selectedStatus === status ? '500' : '400',
-                      }}>
-                        {status.charAt(0).toUpperCase() + status.slice(1)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
+            <View style={styles.balanceIcon}>
+              <Ionicons name="wallet-outline" size={28} color="#5B94D3" />
             </View>
           </View>
-        </View>
 
-        {/* List */}
-        <View className="mx-4 mb-4">
-          <View className="bg-white rounded-xl shadow-sm">
-            <View className="px-4 py-3 border-b border-gray-100">
-              <Text className="text-lg font-semibold text-gray-900">
-                {activeTab === 'history' ? 'Payout History' : 'Payout Requests'}
-              </Text>
-              <Text className="text-sm text-gray-500">
-                Showing {paginatedItems.length} of {currentItems.length} results
-              </Text>
+          {hasPending && (
+            <View style={styles.pendingBanner}>
+              <Ionicons name="time-outline" size={16} color="#D97706" />
+              <Text style={styles.pendingBannerText}>You have a pending payout request</Text>
             </View>
+          )}
 
-            {paginatedItems.length > 0 ? (
-              <View>
-                {paginatedItems.map((item, index) => (
-                  <View key={item.id}>
-                    {activeTab === 'history'
-                      ? renderPayout({ item: item as Payout })
-                      : renderPayoutRequest({ item: item as PayoutRequest })
-                    }
-                    {index < paginatedItems.length - 1 && (
-                      <View className="border-b border-gray-100" />
-                    )}
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <View className="items-center justify-center py-20">
-                <Ionicons name="wallet-outline" size={48} color="#9CA3AF" />
-                <Text className="text-gray-500 mt-2">
-                  {activeTab === 'history' ? 'No payout history found' : 'No payout requests found'}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <View className="px-4 py-3 border-t border-gray-100 bg-gray-50 mt-2 rounded-xl">
-              <View className="flex-row justify-between items-center">
-                <TouchableOpacity
-                  onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                  disabled={currentPage === 1}
-                  style={{
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
-                    borderRadius: 8,
-                    backgroundColor: currentPage === 1 ? '#E5E7EB' : '#5B94D3'
-                  }}
-                >
-                  <Text style={{
-                    fontWeight: '500',
-                    color: currentPage === 1 ? '#9CA3AF' : '#FFFFFF'
-                  }}>
-                    Previous
-                  </Text>
-                </TouchableOpacity>
-
-                <Text className="text-sm text-gray-600">
-                  Page {currentPage} of {totalPages}
-                </Text>
-
-                <TouchableOpacity
-                  onPress={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                  disabled={currentPage === totalPages}
-                  style={{
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
-                    borderRadius: 8,
-                    backgroundColor: currentPage === totalPages ? '#E5E7EB' : '#5B94D3'
-                  }}
-                >
-                  <Text style={{
-                    fontWeight: '500',
-                    color: currentPage === totalPages ? '#9CA3AF' : '#FFFFFF'
-                  }}>
-                    Next
-                  </Text>
-                </TouchableOpacity>
-              </View>
+          {balance < MIN_PAYOUT && !hasPending && (
+            <View style={styles.insufficientBanner}>
+              <Ionicons name="information-circle-outline" size={16} color="#6B7280" />
+              <Text style={styles.insufficientBannerText}>
+                Minimum payout is {formatCurrency(MIN_PAYOUT)}. Keep earning to unlock payouts.
+              </Text>
             </View>
           )}
         </View>
-        </ScrollView>
-      </TouchableWithoutFeedback>
 
-      {/* Request Payout Modal - Method Selection */}
-      <Modal
-        visible={showRequestModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => { setShowRequestModal(false); resetForm(); }}
-      >
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-3xl p-6 pb-10">
-            <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-xl font-bold">Request Payout</Text>
-              <TouchableOpacity onPress={() => { setShowRequestModal(false); resetForm(); }}>
+        {/* ── Auto-payout info card ── */}
+        {autoPayoutSettings?.enabled && (
+          <View style={styles.autoPayoutCard}>
+            <View style={styles.autoPayoutHeader}>
+              <Ionicons name="flash" size={16} color="#059669" />
+              <Text style={styles.autoPayoutTitle}>Auto-Payout Active</Text>
+            </View>
+            {autoPayoutSettings.amountUntilAutoPayout > 0 ? (
+              <Text style={styles.autoPayoutText}>
+                Your eWallet will be sent automatically when your balance reaches{' '}
+                <Text style={styles.autoPayoutBold}>{formatCurrency(autoPayoutSettings.threshold)}</Text>.
+                {' '}You are{' '}
+                <Text style={styles.autoPayoutBold}>{formatCurrency(autoPayoutSettings.amountUntilAutoPayout)}</Text>
+                {' '}away.
+              </Text>
+            ) : (
+              <Text style={styles.autoPayoutText}>
+                Your balance has reached the auto-payout threshold of{' '}
+                <Text style={styles.autoPayoutBold}>{formatCurrency(autoPayoutSettings.threshold)}</Text>.
+                {' '}An automatic eWallet payout will be processed shortly.
+              </Text>
+            )}
+            {autoPayoutSettings.isCustom && (
+              <Text style={styles.autoPayoutCustom}>Custom threshold set for your account</Text>
+            )}
+          </View>
+        )}
+
+        {/* ── Request payout button / form ── */}
+        {!showForm ? (
+          <TouchableOpacity
+            style={[
+              styles.requestBtn,
+              (balance < MIN_PAYOUT || hasPending) && styles.requestBtnDisabled,
+            ]}
+            onPress={() => {
+              if (hasPending) {
+                showModal('warning', 'Request Already Pending',
+                  'Please wait for your current payout request to be processed before submitting a new one.');
+              } else if (balance < MIN_PAYOUT) {
+                showModal('info', 'Insufficient Balance',
+                  `You need at least ${formatCurrency(MIN_PAYOUT)} to request a payout. Your current balance is ${formatCurrency(balance)}.`);
+              } else {
+                setShowForm(true);
+              }
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="arrow-up-circle-outline" size={22} color="#fff" />
+            <Text style={styles.requestBtnText}>Request Payout</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.formCard}>
+            <View style={styles.formHeader}>
+              <Text style={styles.formTitle}>Request Bank Transfer</Text>
+              <TouchableOpacity onPress={() => { setShowForm(false); setAmount(''); setNotes(''); }}>
                 <Ionicons name="close" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
-            {/* Balance Display */}
-            <View className="bg-gray-50 rounded-xl p-4 mb-6">
-              <Text className="text-sm text-gray-500 mb-1">Available Balance</Text>
-              <Text className="text-2xl font-bold text-gray-900">
-                {formatCurrency(guardData?.balance || 0)}
-              </Text>
-            </View>
-
-            {/* Payout Method Selection */}
-            <Text className="text-sm font-medium text-gray-700 mb-3">Choose Payout Method</Text>
-
-            {/* 1Voucher Option */}
-            <TouchableOpacity
-              onPress={() => handleSelectMethod('voucher')}
-              className={`border-2 rounded-xl p-4 mb-3 ${
-                payoutMethod === 'voucher' ? 'border-green-500 bg-green-50' : 'border-gray-200'
-              }`}
-            >
-              <View className="flex-row items-center">
-                <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${
-                  payoutMethod === 'voucher' ? 'bg-green-100' : 'bg-gray-100'
-                }`}>
-                  <Ionicons
-                    name="card"
-                    size={24}
-                    color={payoutMethod === 'voucher' ? '#10B981' : '#6B7280'}
-                  />
-                </View>
-                <View className="flex-1">
-                  <Text className={`text-base font-semibold ${
-                    payoutMethod === 'voucher' ? 'text-green-700' : 'text-gray-900'
-                  }`}>
-                    1Voucher (Instant)
+            {/* Quick amounts */}
+            <Text style={styles.fieldLabel}>Quick Select</Text>
+            <View style={styles.quickRow}>
+              {QUICK_AMOUNTS.filter(a => a <= balance).map(a => (
+                <TouchableOpacity
+                  key={a}
+                  style={[styles.quickBtn, parsedAmount === a && styles.quickBtnActive]}
+                  onPress={() => setAmount(String(a))}
+                >
+                  <Text style={[styles.quickBtnText, parsedAmount === a && styles.quickBtnTextActive]}>
+                    R{a}
                   </Text>
-                  <Text className="text-sm text-gray-500">
-                    Get a cash voucher PIN immediately
-                  </Text>
-                  <Text className="text-xs text-gray-400 mt-1">
-                    Min: R5 | Max: R5,000
-                  </Text>
-                </View>
-                {payoutMethod === 'voucher' && (
-                  <Ionicons name="checkmark-circle" size={24} color="#10B981" />
-                )}
-              </View>
-            </TouchableOpacity>
-
-            {/* Bank Transfer Option */}
-            <TouchableOpacity
-              onPress={() => handleSelectMethod('bank_transfer')}
-              className={`border-2 rounded-xl p-4 mb-6 ${
-                payoutMethod === 'bank_transfer' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-              }`}
-            >
-              <View className="flex-row items-center">
-                <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${
-                  payoutMethod === 'bank_transfer' ? 'bg-blue-100' : 'bg-gray-100'
-                }`}>
-                  <Ionicons
-                    name="business"
-                    size={24}
-                    color={payoutMethod === 'bank_transfer' ? '#3B82F6' : '#6B7280'}
-                  />
-                </View>
-                <View className="flex-1">
-                  <Text className={`text-base font-semibold ${
-                    payoutMethod === 'bank_transfer' ? 'text-blue-700' : 'text-gray-900'
-                  }`}>
-                    Bank Transfer
-                  </Text>
-                  <Text className="text-sm text-gray-500">
-                    Request transfer to your bank account
-                  </Text>
-                  <Text className="text-xs text-gray-400 mt-1">
-                    Min: R50 | Requires approval (1-3 days)
-                  </Text>
-                </View>
-                {payoutMethod === 'bank_transfer' && (
-                  <Ionicons name="checkmark-circle" size={24} color="#3B82F6" />
-                )}
-              </View>
-            </TouchableOpacity>
-
-            {/* Amount Input (shown when method selected) */}
-            {payoutMethod && (
-              <>
-                <Text className="text-sm font-medium text-gray-700 mb-2">Amount</Text>
-                <View className="flex-row items-center bg-gray-50 rounded-lg px-4 py-3 mb-3">
-                  <Text className="text-xl font-bold text-gray-700 mr-2">R</Text>
-                  <TextInput
-                    value={amount}
-                    onChangeText={setAmount}
-                    placeholder="0.00"
-                    keyboardType="numeric"
-                    className="flex-1 text-xl"
-                  />
-                </View>
-
-                {/* Quick Amount Buttons */}
-                <View className="flex-row flex-wrap mb-4">
-                  {QUICK_AMOUNTS.map((quickAmount) => (
-                    <TouchableOpacity
-                      key={quickAmount}
-                      onPress={() => handleQuickAmount(quickAmount)}
-                      className={`px-4 py-2 rounded-lg mr-2 mb-2 ${
-                        amount === quickAmount.toString()
-                          ? 'bg-gray-800'
-                          : 'bg-gray-100'
-                      }`}
-                    >
-                      <Text className={`font-medium ${
-                        amount === quickAmount.toString() ? 'text-white' : 'text-gray-700'
-                      }`}>
-                        R{quickAmount}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Notes (optional) */}
-                <Text className="text-sm font-medium text-gray-700 mb-2">Notes (Optional)</Text>
-                <TextInput
-                  value={notes}
-                  onChangeText={setNotes}
-                  placeholder="Add a note for this request..."
-                  multiline
-                  numberOfLines={2}
-                  className="bg-gray-50 rounded-lg px-4 py-3 mb-6 text-base"
-                  style={{ minHeight: 60, textAlignVertical: 'top' }}
-                />
-              </>
-            )}
-
-            {/* Continue Button */}
-            <TouchableOpacity
-              onPress={handleProceedToConfirm}
-              disabled={!payoutMethod || !amount}
-              style={{
-                backgroundColor: payoutMethod && amount ? '#5B94D3' : '#E5E7EB',
-              }}
-              className="rounded-lg py-4 items-center"
-            >
-              <Text style={{
-                color: payoutMethod && amount ? '#FFFFFF' : '#9CA3AF',
-              }} className="font-semibold text-base">
-                Continue
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Confirmation Modal */}
-      <Modal
-        visible={showConfirmModal}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setShowConfirmModal(false)}
-      >
-        <View className="flex-1 justify-center items-center bg-black/50 px-6">
-          <View className="bg-white rounded-2xl p-6 w-full max-w-sm">
-            <View className="items-center mb-6">
-              <View className={`w-16 h-16 rounded-full items-center justify-center mb-4 ${
-                payoutMethod === 'voucher' ? 'bg-green-100' : 'bg-blue-100'
-              }`}>
-                <Ionicons
-                  name={payoutMethod === 'voucher' ? 'card' : 'business'}
-                  size={32}
-                  color={payoutMethod === 'voucher' ? '#10B981' : '#3B82F6'}
-                />
-              </View>
-              <Text className="text-xl font-bold text-gray-900 mb-2">Confirm Payout</Text>
-              <Text className="text-gray-500 text-center">
-                {payoutMethod === 'voucher'
-                  ? 'You will receive a 1Voucher PIN instantly'
-                  : 'Your request will be sent for admin approval'
-                }
-              </Text>
-            </View>
-
-            <View className="bg-gray-50 rounded-xl p-4 mb-6">
-              <View className="flex-row justify-between mb-2">
-                <Text className="text-gray-500">Method</Text>
-                <Text className="font-medium text-gray-900">
-                  {payoutMethod === 'voucher' ? '1Voucher' : 'Bank Transfer'}
-                </Text>
-              </View>
-              <View className="flex-row justify-between mb-2">
-                <Text className="text-gray-500">Amount</Text>
-                <Text className="font-bold text-gray-900 text-lg">
-                  {formatCurrency(parseFloat(amount) || 0)}
-                </Text>
-              </View>
-              {notes && (
-                <View className="mt-2 pt-2 border-t border-gray-200">
-                  <Text className="text-gray-500 text-sm">Note: {notes}</Text>
-                </View>
-              )}
-            </View>
-
-            <View className="flex-row space-x-3">
+                </TouchableOpacity>
+              ))}
               <TouchableOpacity
-                onPress={() => { setShowConfirmModal(false); setShowRequestModal(true); }}
-                className="flex-1 bg-gray-100 rounded-lg py-3 items-center mr-2"
-                disabled={isProcessing}
+                style={[styles.quickBtn, amount === String(maxWithdrawable) && styles.quickBtnActive]}
+                onPress={() => setAmount(String(maxWithdrawable))}
               >
-                <Text className="font-medium text-gray-700">Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleConfirmPayout}
-                disabled={isProcessing}
-                style={{ backgroundColor: payoutMethod === 'voucher' ? '#10B981' : '#3B82F6' }}
-                className="flex-1 rounded-lg py-3 items-center ml-2"
-              >
-                {isProcessing ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text className="font-semibold text-white">
-                    {payoutMethod === 'voucher' ? 'Get Voucher' : 'Submit Request'}
-                  </Text>
-                )}
+                <Text style={[styles.quickBtnText, amount === String(maxWithdrawable) && styles.quickBtnTextActive]}>
+                  Max ({formatCurrency(maxWithdrawable)})
+                </Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
 
-      {/* Voucher Result Modal */}
-      <Modal
-        visible={showVoucherResultModal}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => { setShowVoucherResultModal(false); setVoucherResult(null); resetForm(); }}
-      >
-        <View className="flex-1 justify-center items-center bg-black/50 px-6">
-          <View className="bg-white rounded-2xl p-6 w-full max-w-sm">
-            <View className="items-center mb-6">
-              <View className="w-16 h-16 rounded-full bg-green-100 items-center justify-center mb-4">
-                <Ionicons name="checkmark-circle" size={40} color="#10B981" />
-              </View>
-              <Text className="text-xl font-bold text-gray-900 mb-2">Voucher Ready!</Text>
-              <Text className="text-gray-500 text-center">
-                Your 1Voucher has been generated. Use the PIN below to redeem your cash.
-              </Text>
+            {/* Amount input */}
+            <Text style={styles.fieldLabel}>Amount (R)</Text>
+            <View style={[styles.inputWrapper, amountError ? styles.inputWrapperError : null]}>
+              <Text style={styles.currencyPrefix}>R</Text>
+              <TextInput
+                style={styles.amountInput}
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="numeric"
+                placeholder="0.00"
+                placeholderTextColor="#9CA3AF"
+              />
             </View>
 
-            {voucherResult && (
-              <View className="bg-gray-50 rounded-xl p-4 mb-4">
-                {/* PIN Display */}
-                <View className="mb-4">
-                  <Text className="text-sm text-gray-500 mb-2">Voucher PIN</Text>
-                  <TouchableOpacity
-                    onPress={() => handleCopyToClipboard(voucherResult.pin, 'pin')}
-                    className="bg-white border border-gray-200 rounded-lg p-3 flex-row items-center justify-between"
-                  >
-                    <Text className="text-lg font-mono font-bold text-gray-900">
-                      {formatVoucherPin(voucherResult.pin)}
-                    </Text>
-                    <View className="flex-row items-center">
-                      {copiedField === 'pin' ? (
-                        <Ionicons name="checkmark" size={20} color="#10B981" />
-                      ) : (
-                        <Ionicons name="copy-outline" size={20} color="#6B7280" />
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Serial Number */}
-                <View className="mb-4">
-                  <Text className="text-sm text-gray-500 mb-2">Serial Number</Text>
-                  <TouchableOpacity
-                    onPress={() => handleCopyToClipboard(voucherResult.serialNumber, 'serial')}
-                    className="bg-white border border-gray-200 rounded-lg p-3 flex-row items-center justify-between"
-                  >
-                    <Text className="text-sm font-medium text-gray-700">
-                      {voucherResult.serialNumber}
-                    </Text>
-                    {copiedField === 'serial' ? (
-                      <Ionicons name="checkmark" size={18} color="#10B981" />
-                    ) : (
-                      <Ionicons name="copy-outline" size={18} color="#6B7280" />
-                    )}
-                  </TouchableOpacity>
-                </View>
-
-                {/* Amount & Expiry */}
-                <View className="flex-row justify-between">
-                  <View>
-                    <Text className="text-sm text-gray-500">Amount</Text>
-                    <Text className="font-bold text-gray-900">
-                      {formatCurrency(voucherResult.amount)}
-                    </Text>
-                  </View>
-                  <View className="items-end">
-                    <Text className="text-sm text-gray-500">Expires</Text>
-                    <Text className="font-medium text-gray-700">
-                      {formatDate(voucherResult.expiryDate)}
-                    </Text>
-                  </View>
-                </View>
+            {amountError ? (
+              <View style={styles.fieldError}>
+                <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+                <Text style={styles.fieldErrorText}>{amountError}</Text>
               </View>
-            )}
+            ) : parsedAmount >= MIN_PAYOUT && parsedAmount <= balance ? (
+              <View style={styles.fieldSuccess}>
+                <Ionicons name="checkmark-circle-outline" size={14} color="#059669" />
+                <Text style={styles.fieldSuccessText}>
+                  {formatCurrency(parsedAmount)} will be sent to your registered bank account
+                </Text>
+              </View>
+            ) : null}
 
-            <View className="bg-yellow-50 rounded-lg p-3 mb-4">
-              <View className="flex-row items-start">
-                <Ionicons name="warning" size={20} color="#D97706" />
-                <Text className="text-sm text-yellow-800 ml-2 flex-1">
-                  Save this PIN securely. You will need it to redeem your voucher at any Flash retailer.
+            {/* Notes */}
+            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Notes (optional)</Text>
+            <TextInput
+              style={styles.notesInput}
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Any additional notes for the admin..."
+              placeholderTextColor="#9CA3AF"
+              multiline
+              numberOfLines={3}
+              maxLength={200}
+            />
+
+            {/* Info box */}
+            <View style={styles.infoBox}>
+              <Ionicons name="information-circle-outline" size={18} color="#2563EB" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.infoTitle}>How payouts work</Text>
+                <Text style={styles.infoText}>
+                  Your request goes to the admin for approval. Once approved, the amount is transferred to your registered bank account. This typically takes 1–2 business days.
                 </Text>
               </View>
             </View>
 
+            {/* Submit */}
             <TouchableOpacity
-              onPress={() => { setShowVoucherResultModal(false); setVoucherResult(null); resetForm(); }}
-              style={{ backgroundColor: '#10B981' }}
-              className="rounded-lg py-4 items-center"
+              style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
+              onPress={handleSubmit}
+              disabled={!canSubmit}
+              activeOpacity={0.8}
             >
-              <Text className="font-semibold text-white">Done</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Result Modal (Success/Error feedback) */}
-      <Modal
-        visible={showResultModal}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setShowResultModal(false)}
-      >
-        <View className="flex-1 justify-center items-center bg-black/50 px-6">
-          <View className="bg-white rounded-2xl p-6 w-full max-w-sm">
-            <View className="items-center mb-6">
-              <View className={`w-16 h-16 rounded-full items-center justify-center mb-4 ${
-                resultType === 'success' ? 'bg-green-100' : 'bg-red-100'
-              }`}>
-                <Ionicons
-                  name={resultType === 'success' ? 'checkmark-circle' : 'close-circle'}
-                  size={40}
-                  color={resultType === 'success' ? '#10B981' : '#EF4444'}
-                />
-              </View>
-              <Text className="text-xl font-bold text-gray-900 mb-2">{resultTitle}</Text>
-              <Text className="text-gray-500 text-center">{resultMessage}</Text>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => {
-                setShowResultModal(false);
-                if (resultType === 'success') {
-                  loadData();
-                }
-              }}
-              style={{ backgroundColor: resultType === 'success' ? '#10B981' : '#5B94D3' }}
-              className="rounded-lg py-4 items-center"
-            >
-              <Text className="font-semibold text-white">OK</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Settings Modal */}
-      <Modal
-        visible={showSettingsModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowSettingsModal(false)}
-      >
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-3xl p-6 pb-10">
-            <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-xl font-bold">Payout Settings</Text>
-              <TouchableOpacity onPress={() => setShowSettingsModal(false)}>
-                <Ionicons name="close" size={24} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Auto Payout Settings */}
-            <View className="mb-6">
-              <Text className="text-lg font-semibold text-gray-900 mb-4">Auto Payout</Text>
-
-              <View className="flex-row items-center justify-between mb-4">
-                <View className="flex-1">
-                  <Text className="text-base text-gray-700">Enable Auto Payout</Text>
-                  <Text className="text-sm text-gray-500">
-                    Automatically request payouts when threshold is reached
-                  </Text>
-                </View>
-                <Switch
-                  value={autoPayoutEnabled}
-                  onValueChange={setAutoPayoutEnabled}
-                  trackColor={{ false: '#d1d5db', true: '#5B94D3' }}
-                  thumbColor={autoPayoutEnabled ? '#ffffff' : '#ffffff'}
-                />
-              </View>
-
-              {autoPayoutEnabled && (
-                <View>
-                  <Text className="text-sm font-medium text-gray-700 mb-2">
-                    Auto Payout Threshold
-                  </Text>
-                  <View className="flex-row items-center bg-gray-50 rounded-lg px-4 py-3">
-                    <Text className="text-lg font-bold text-gray-700 mr-2">R</Text>
-                    <TextInput
-                      value={autoPayoutThreshold}
-                      onChangeText={setAutoPayoutThreshold}
-                      placeholder="500"
-                      keyboardType="numeric"
-                      className="flex-1 text-lg"
-                    />
-                  </View>
-                  <Text className="text-xs text-gray-500 mt-2">
-                    Minimum threshold: R100.00
-                  </Text>
-                </View>
+              {isSubmitting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="send-outline" size={18} color="#fff" />
+                  <Text style={styles.submitBtnText}>Submit Request</Text>
+                </>
               )}
-            </View>
-
-            {/* Payout Schedule */}
-            <View className="mb-6">
-              <Text className="text-lg font-semibold text-gray-900 mb-4">Payout Schedule</Text>
-              <View className="bg-blue-50 rounded-lg p-4">
-                <View className="flex-row items-center mb-2">
-                  <Ionicons name="information-circle" size={20} color="#3B82F6" />
-                  <Text className="text-blue-800 font-medium ml-2">Next Payout</Text>
-                </View>
-                <Text className="text-blue-700">
-                  Your next automatic payout is scheduled for {formatDate(nextPayoutDate)}
-                </Text>
-              </View>
-            </View>
-
-            {/* Save Button */}
-            <TouchableOpacity
-              onPress={() => {
-                Alert.alert('Settings Saved', 'Your payout settings have been updated.');
-                setShowSettingsModal(false);
-              }}
-              style={{ backgroundColor: '#5B94D3' }}
-              className="rounded-lg py-4 items-center"
-            >
-              <Text className="text-white font-semibold text-base">Save Settings</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+        )}
+
+        {/* ── Payout history ── */}
+        <Text style={styles.sectionTitle}>Payout History</Text>
+
+        {requests.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="receipt-outline" size={48} color="#D1D5DB" />
+            <Text style={styles.emptyTitle}>No payout requests yet</Text>
+            <Text style={styles.emptySub}>Your payout history will appear here</Text>
+          </View>
+        ) : (
+          requests.map(req => {
+            const cfg = STATUS_CONFIG[req.status] ?? STATUS_CONFIG['PENDING'];
+            return (
+              <View key={req.id ?? req.payoutId} style={styles.requestCard}>
+                <View style={styles.requestRow}>
+                  <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
+                    <Ionicons name={cfg.icon as any} size={14} color={cfg.color} />
+                    <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+                  </View>
+                  <Text style={styles.requestAmount}>{formatCurrency(req.amount)}</Text>
+                </View>
+
+                <Text style={styles.requestDate}>
+                  Requested: {new Date(req.requestedAt ?? req.createdAt ?? '').toLocaleDateString('en-ZA', {
+                    day: 'numeric', month: 'short', year: 'numeric'
+                  })}
+                </Text>
+
+                {req.notes ? (
+                  <Text style={styles.requestNotes}>Note: {req.notes}</Text>
+                ) : null}
+
+                {(req.status === 'REJECTED' || req.status === 'CANCELLED') && req.rejectionReason ? (
+                  <View style={styles.rejectionBox}>
+                    <Ionicons name="close-circle-outline" size={14} color="#DC2626" />
+                    <Text style={styles.rejectionText}>Reason: {req.rejectionReason}</Text>
+                  </View>
+                ) : null}
+
+                {req.status === 'FAILED' ? (
+                  <View style={styles.failedBox}>
+                    <Ionicons name="refresh-circle-outline" size={14} color="#EA580C" />
+                    <Text style={styles.failedText}>
+                      Your balance of {formatCurrency(req.amount)} has been credited back. Please try again.
+                      {req.rejectionReason ? `\nReason: ${req.rejectionReason}` : ''}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {req.status === 'COMPLETED' && req.adminNotes ? (
+                  <View style={styles.approvalBox}>
+                    <Ionicons name="checkmark-circle-outline" size={14} color="#059669" />
+                    <Text style={styles.approvalText}>Ref: {req.adminNotes}</Text>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
+
+      <AlertModal
+        visible={modal.visible}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onClose={() => setModal(prev => ({ ...prev, visible: false }))}
+      />
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container:  { flex: 1, backgroundColor: '#F9FAFB' },
+  centered:   { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB', gap: 12 },
+  loadingText:{ marginTop: 8, color: '#6B7280', fontSize: 15, fontFamily: 'Nunito-Regular' },
+  errorText:  { marginTop: 8, color: '#DC2626', fontSize: 15, fontFamily: 'Nunito-Regular', textAlign: 'center', paddingHorizontal: 24 },
+
+  // Header
+  header:      { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 },
+  headerTitle: { fontSize: 26, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827' },
+  headerSub:   { fontSize: 14, fontFamily: 'Nunito-Regular', color: '#6B7280', marginTop: 2 },
+
+  // Balance card
+  balanceCard:   { margin: 16, backgroundColor: '#fff', borderRadius: 16, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
+  balanceRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  balanceLabel:  { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#6B7280', marginBottom: 4 },
+  balanceAmount: { fontSize: 32, fontWeight: '800', fontFamily: 'Nunito-Bold', color: '#111827' },
+  balanceIcon:   { width: 52, height: 52, borderRadius: 26, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
+
+  pendingBanner:        { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, backgroundColor: '#FEF3C7', borderRadius: 8, padding: 10 },
+  pendingBannerText:    { color: '#D97706', fontSize: 13, fontWeight: '500', fontFamily: 'Nunito-Medium', flex: 1 },
+  insufficientBanner:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, backgroundColor: '#F3F4F6', borderRadius: 8, padding: 10 },
+  insufficientBannerText: { color: '#6B7280', fontSize: 13, fontFamily: 'Nunito-Regular', flex: 1 },
+
+  // Request button
+  requestBtn:         { marginHorizontal: 16, backgroundColor: '#5B94D3', borderRadius: 14, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, shadowColor: '#5B94D3', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  requestBtnDisabled: { backgroundColor: '#9CA3AF', shadowOpacity: 0 },
+  requestBtnText:     { color: '#fff', fontSize: 16, fontWeight: '700', fontFamily: 'Nunito-Bold' },
+
+  // Form
+  formCard:    { margin: 16, backgroundColor: '#fff', borderRadius: 16, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
+  formHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  formTitle:   { fontSize: 18, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827' },
+
+  fieldLabel:  { fontSize: 13, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#374151', marginBottom: 8 },
+
+  quickRow:    { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 16 },
+  quickBtn:    { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
+  quickBtnActive: { backgroundColor: '#EFF6FF', borderColor: '#5B94D3' },
+  quickBtnText:   { fontSize: 14, color: '#374151', fontWeight: '500', fontFamily: 'Nunito-Medium' },
+  quickBtnTextActive: { color: '#5B94D3', fontWeight: '700', fontFamily: 'Nunito-Bold' },
+
+  inputWrapper:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB', paddingHorizontal: 14 },
+  inputWrapperError: { borderColor: '#FCA5A5' },
+  currencyPrefix:    { fontSize: 20, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#374151', marginRight: 4 },
+  amountInput:       { flex: 1, fontSize: 24, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827', paddingVertical: 14 },
+
+  fieldError:       { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
+  fieldErrorText:   { color: '#DC2626', fontSize: 13, fontFamily: 'Nunito-Regular' },
+  fieldSuccess:     { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
+  fieldSuccessText: { color: '#059669', fontSize: 13, fontFamily: 'Nunito-Regular' },
+
+  notesInput: { backgroundColor: '#F9FAFB', borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB', padding: 14, fontSize: 14, fontFamily: 'Nunito-Regular', color: '#111827', textAlignVertical: 'top', minHeight: 80 },
+
+  infoBox:   { flexDirection: 'row', gap: 10, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 14, marginTop: 16 },
+  infoTitle: { fontSize: 13, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#1D4ED8', marginBottom: 2 },
+  infoText:  { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#3B82F6', lineHeight: 18 },
+
+  submitBtn:         { backgroundColor: '#5B94D3', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 20 },
+  submitBtnDisabled: { backgroundColor: '#9CA3AF' },
+  submitBtnText:     { color: '#fff', fontSize: 16, fontWeight: '700', fontFamily: 'Nunito-Bold' },
+
+  // Section title
+  sectionTitle: { fontSize: 17, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827', marginHorizontal: 16, marginTop: 24, marginBottom: 12 },
+
+  // Empty state
+  emptyState: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 },
+  emptyTitle: { fontSize: 16, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#6B7280', marginTop: 12 },
+  emptySub:   { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#9CA3AF', marginTop: 4 },
+
+  // Request card
+  requestCard:   { marginHorizontal: 16, marginBottom: 10, backgroundColor: '#fff', borderRadius: 14, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  requestRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  statusBadge:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  statusText:    { fontSize: 12, fontWeight: '600', fontFamily: 'Nunito-SemiBold' },
+  requestAmount: { fontSize: 18, fontWeight: '800', fontFamily: 'Nunito-Bold', color: '#111827' },
+  requestDate:   { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9CA3AF' },
+  requestNotes:  { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#6B7280', marginTop: 6, fontStyle: 'italic' },
+
+  rejectionBox:  { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8, backgroundColor: '#FEE2E2', borderRadius: 8, padding: 8 },
+  rejectionText: { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#DC2626', flex: 1 },
+  failedBox:     { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8, backgroundColor: '#FFF7ED', borderRadius: 8, padding: 8 },
+  failedText:    { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#EA580C', flex: 1, lineHeight: 18 },
+  approvalBox:   { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8, backgroundColor: '#D1FAE5', borderRadius: 8, padding: 8 },
+  approvalText:  { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#059669', flex: 1 },
+
+  // Auto-payout card
+  autoPayoutCard:   { marginHorizontal: 16, marginBottom: 12, backgroundColor: '#ECFDF5', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#A7F3D0' },
+  autoPayoutHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  autoPayoutTitle:  { fontSize: 13, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#059669' },
+  autoPayoutText:   { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#065F46', lineHeight: 19 },
+  autoPayoutBold:   { fontWeight: '700', fontFamily: 'Nunito-Bold' },
+  autoPayoutCustom: { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#6EE7B7', marginTop: 6 },
+});

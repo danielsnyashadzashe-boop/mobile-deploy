@@ -9,7 +9,7 @@ import {
 } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
 import { Ionicons } from '@expo/vector-icons'
-import { useUser } from '@clerk/clerk-expo'
+import { useAuth } from '../contexts/AuthContext'
 
 interface DocumentUploadProps {
   documentType: string
@@ -24,7 +24,7 @@ export default function DocumentUpload({
   onUploadComplete,
   existingUrl
 }: DocumentUploadProps) {
-  const { user } = useUser()
+  const { guard: authGuard } = useAuth()
   const [uploading, setUploading] = useState(false)
   const [uploadedUrl, setUploadedUrl] = useState(existingUrl || '')
   const [error, setError] = useState('')
@@ -69,7 +69,7 @@ export default function DocumentUpload({
         name: file.name,
       } as any)
       formData.append('documentType', documentType)
-      formData.append('userId', user?.id || 'unknown')
+      formData.append('userId', authGuard?.guardPublicId || 'unknown')
 
       // Upload to backend
       const response = await fetch(`${apiUrl}/api/upload/document`, {

@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
-import { useUser } from '@clerk/clerk-expo';
+import { useAuth } from '../contexts/AuthContext';
 import { useGuard } from '../contexts/GuardContext';
 import { purchaseVoucher, VoucherPurchaseResponse } from '../src/services/flashApi';
 import { IS_SANDBOX_MODE } from '../src/config/api';
@@ -42,9 +42,9 @@ const MAX_VOUCHER_AMOUNT = 4000;
 
 export default function VoucherPurchaseScreen() {
   const router = useRouter();
-  const { user } = useUser();
+  const { guard: authGuard } = useAuth();
   const { guardData, updateBalance } = useGuard();
-  const clerkUserId = user?.id;
+  const clerkUserId = authGuard?.guardPublicId || '';
 
   // Form state
   const [amount, setAmount] = useState('');

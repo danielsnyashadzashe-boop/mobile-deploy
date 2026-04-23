@@ -7,10 +7,11 @@ import {
   StyleSheet,
   Platform,
   StatusBar,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useUser } from '@clerk/clerk-expo';
+import { useAuth } from '../../contexts/AuthContext';
 import { useGuard } from '../../contexts/GuardContext';
 import AirtimePurchaseModal from '../../components/purchases/AirtimePurchaseModal';
 import ElectricityPurchaseModal from '../../components/purchases/ElectricityPurchaseModal';
@@ -46,23 +47,29 @@ const services = [
 ];
 
 export default function ServicesScreen() {
-  const { user } = useUser();
+  const { guard: authGuard } = useAuth();
   const { guardData, refreshGuardData } = useGuard();
   const [activeModal, setActiveModal] = useState<ServiceType>(null);
+  const [showComingSoon, setShowComingSoon] = useState(false);
+  const [comingSoonFeature, setComingSoonFeature] = useState('');
 
   const handleServicePress = (serviceId: ServiceType) => {
-    setActiveModal(serviceId);
+    const labels: Record<string, string> = {
+      airtime: 'Airtime Purchase',
+      electricity: 'Electricity Purchase',
+      voucher: 'Cash Voucher',
+    };
+    if (serviceId && labels[serviceId]) {
+      setComingSoonFeature(labels[serviceId]);
+      setShowComingSoon(true);
+    }
   };
 
   const handleCloseModal = () => {
     setActiveModal(null);
   };
 
-  const handlePurchaseSuccess = (newBalance: number) => {
-    // Refresh guard data to update balance
-    if (user?.id) {
-      refreshGuardData(user.id);
-    }
+  const handlePurchaseSuccess = (_newBalance: number) => {
     setActiveModal(null);
   };
 
@@ -147,7 +154,7 @@ export default function ServicesScreen() {
         onClose={handleCloseModal}
         onSuccess={handlePurchaseSuccess}
         balance={guardData?.balance || 0}
-        clerkUserId={user?.id || ''}
+        clerkUserId={authGuard?.guardId || ''}
       />
 
       <ElectricityPurchaseModal
@@ -155,7 +162,7 @@ export default function ServicesScreen() {
         onClose={handleCloseModal}
         onSuccess={handlePurchaseSuccess}
         balance={guardData?.balance || 0}
-        clerkUserId={user?.id || ''}
+        clerkUserId={authGuard?.guardId || ''}
       />
 
       <VoucherPurchaseModal
@@ -163,8 +170,39 @@ export default function ServicesScreen() {
         onClose={handleCloseModal}
         onSuccess={handlePurchaseSuccess}
         balance={guardData?.balance || 0}
-        clerkUserId={user?.id || ''}
+        clerkUserId={authGuard?.guardId || ''}
       />
+
+      {/* Coming Soon Modal */}
+      <Modal
+        visible={showComingSoon}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowComingSoon(false)}
+        statusBarTranslucent
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 28, width: '100%', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 10 }}>
+            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Ionicons name="rocket-outline" size={32} color="#5B94D3" />
+            </View>
+            <Text style={{ fontSize: 20, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827', marginBottom: 8 }}>Coming Soon</Text>
+            <Text style={{ fontSize: 15, color: '#6B7280', textAlign: 'center', lineHeight: 22, marginBottom: 8 }}>
+              <Text style={{ fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#374151' }}>{comingSoonFeature}</Text> is not yet available.
+            </Text>
+            <Text style={{ fontSize: 13, color: '#9CA3AF', textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>
+              We're working on it and it will be available in a future update. Stay tuned!
+            </Text>
+            <TouchableOpacity
+              onPress={() => setShowComingSoon(false)}
+              style={{ backgroundColor: '#5B94D3', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 40 }}
+              activeOpacity={0.8}
+            >
+              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700', fontFamily: 'Nunito-Bold' }}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -188,12 +226,14 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
+    fontFamily: 'Nunito-Bold',
     color: '#111827',
     marginBottom: 4,
   },
   headerSubtitle: {
     fontSize: 14,
     color: '#6B7280',
+    fontFamily: 'Nunito-Regular',
   },
   balanceCard: {
     backgroundColor: '#FFFFFF',
@@ -218,10 +258,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
     marginBottom: 4,
+    fontFamily: 'Nunito-Regular',
   },
   balanceAmount: {
     fontSize: 32,
     fontWeight: '700',
+    fontFamily: 'Nunito-Bold',
     color: '#111827',
   },
   servicesGrid: {
@@ -256,6 +298,7 @@ const styles = StyleSheet.create({
   serviceTitle: {
     fontSize: 15,
     fontWeight: '600',
+    fontFamily: 'Nunito-SemiBold',
     color: '#111827',
     marginBottom: 4,
   },
@@ -263,6 +306,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6B7280',
     lineHeight: 18,
+    fontFamily: 'Nunito-Regular',
   },
   infoSection: {
     flexDirection: 'row',
@@ -282,5 +326,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6B7280',
     lineHeight: 18,
+    fontFamily: 'Nunito-Regular',
   },
 });
