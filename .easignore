@@ -1,0 +1,26 @@
+# Other projects in the repo — not part of mobile build
+backend/
+web/
+wiki/
+.claude/
+
+# Documentation
+*.md
+
+# Mobile — exclude heavy artefacts (EAS rebuilds these)
+mobile/node_modules/
+mobile/.expo/
+mobile/.expo-shared/
+mobile/android/
+mobile/ios/
+mobile/.gradle/
+mobile/build/
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

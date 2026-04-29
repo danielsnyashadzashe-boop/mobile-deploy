@@ -13,9 +13,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuard } from '../../contexts/GuardContext';
-import AirtimePurchaseModal from '../../components/purchases/AirtimePurchaseModal';
-import ElectricityPurchaseModal from '../../components/purchases/ElectricityPurchaseModal';
-import VoucherPurchaseModal from '../../components/purchases/VoucherPurchaseModal';
 
 type ServiceType = 'airtime' | 'electricity' | 'voucher' | null;
 
@@ -147,31 +144,6 @@ export default function ServicesScreen() {
           </Text>
         </View>
       </ScrollView>
-
-      {/* Modals */}
-      <AirtimePurchaseModal
-        visible={activeModal === 'airtime'}
-        onClose={handleCloseModal}
-        onSuccess={handlePurchaseSuccess}
-        balance={guardData?.balance || 0}
-        clerkUserId={authGuard?.guardId || ''}
-      />
-
-      <ElectricityPurchaseModal
-        visible={activeModal === 'electricity'}
-        onClose={handleCloseModal}
-        onSuccess={handlePurchaseSuccess}
-        balance={guardData?.balance || 0}
-        clerkUserId={authGuard?.guardId || ''}
-      />
-
-      <VoucherPurchaseModal
-        visible={activeModal === 'voucher'}
-        onClose={handleCloseModal}
-        onSuccess={handlePurchaseSuccess}
-        balance={guardData?.balance || 0}
-        clerkUserId={authGuard?.guardId || ''}
-      />
 
       {/* Coming Soon Modal */}
       <Modal
