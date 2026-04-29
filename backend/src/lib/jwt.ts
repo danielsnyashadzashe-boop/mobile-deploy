@@ -1,3 +1,4 @@
+// @ts-ignore - @types/jsonwebtoken occasionally absent in CI installs
 import jwt from 'jsonwebtoken'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'tippa-fallback-secret'
