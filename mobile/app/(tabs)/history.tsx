@@ -297,15 +297,18 @@ export default function HistoryScreen() {
     );
   };
 
-  // Quick month ranges (last 3 months)
+  // Quick month ranges (last 3 months) — use fresh Date per iteration to avoid mutation bugs
   const quickMonths = Array.from({ length: 3 }, (_, i) => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - i);
-    const y = d.getFullYear();
-    const m = d.getMonth();
-    const label = d.toLocaleString('default', { month: 'long', year: 'numeric' });
-    const start = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-    const end = new Date(y, m + 1, 0).toISOString().split('T')[0];
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() - i;
+    const adjustedYear = year + Math.floor(month / 12);
+    const adjustedMonth = ((month % 12) + 12) % 12;
+    const label = new Date(adjustedYear, adjustedMonth, 1)
+      .toLocaleString('default', { month: 'long', year: 'numeric' });
+    const start = `${adjustedYear}-${String(adjustedMonth + 1).padStart(2, '0')}-01`;
+    const lastDay = new Date(adjustedYear, adjustedMonth + 1, 0).getDate();
+    const end = `${adjustedYear}-${String(adjustedMonth + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
     return { label, start, end };
   });
 
@@ -500,7 +503,7 @@ export default function HistoryScreen() {
               <View style={hStyles.quickRow}>
                 {quickMonths.map(m => (
                   <TouchableOpacity
-                    key={m.label}
+                    key={m.start}
                     style={hStyles.quickChip}
                     onPress={() => { setCustomStartDate(m.start); setCustomEndDate(m.end); }}
                     activeOpacity={0.7}

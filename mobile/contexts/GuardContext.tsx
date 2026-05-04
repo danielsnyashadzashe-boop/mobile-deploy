@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './AuthContext';
 
 export interface GuardData {
   id: string;
@@ -35,33 +36,14 @@ interface GuardContextType {
 
 const GuardContext = createContext<GuardContextType | undefined>(undefined);
 
-// Reads from the same key AuthContext writes to
 const GUARD_KEY = 'tippa_guard';
 
 export function GuardProvider({ children }: { children: ReactNode }) {
-  const [guardData, setGuardDataState] = useState<GuardData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    loadFromStorage();
-  }, []);
-
-  const loadFromStorage = async () => {
-    try {
-      const stored = await AsyncStorage.getItem(GUARD_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setGuardDataState(parsed);
-      }
-    } catch (e) {
-      console.error('GuardContext: error loading from storage', e);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Derive all state from AuthContext — no separate loading from storage needed.
+  // This ensures guard data is available immediately after login without a refresh.
+  const { guard, isLoading, refreshGuard, updateGuardBalance } = useAuth();
 
   const setGuardData = async (data: GuardData | null) => {
-    setGuardDataState(data);
     try {
       if (data) await AsyncStorage.setItem(GUARD_KEY, JSON.stringify(data));
       else await AsyncStorage.removeItem(GUARD_KEY);
@@ -71,28 +53,23 @@ export function GuardProvider({ children }: { children: ReactNode }) {
   };
 
   const clearGuardData = async () => {
-    setGuardDataState(null);
     await AsyncStorage.removeItem(GUARD_KEY).catch(() => {});
   };
 
-  // refreshGuardData is kept for compatibility — screens call it after profile updates
   const refreshGuardData = async (_clerkUserId?: string) => {
-    await loadFromStorage();
+    await refreshGuard();
   };
 
   const updateBalance = async (newBalance: number) => {
-    if (!guardData) return;
-    const updated = { ...guardData, balance: newBalance };
-    setGuardDataState(updated);
-    await AsyncStorage.setItem(GUARD_KEY, JSON.stringify(updated)).catch(() => {});
+    updateGuardBalance(newBalance);
   };
 
   return (
     <GuardContext.Provider value={{
-      guardData,
+      guardData: guard,
       setGuardData,
       clearGuardData,
-      isLinked: !!guardData,
+      isLinked: !!guard,
       isLoading,
       refreshGuardData,
       updateBalance,
