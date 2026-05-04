@@ -266,7 +266,7 @@ export default function DashboardScreen() {
         >
           {/* Logo Section */}
           <View className="items-center mb-6">
-            <TippaLogo size={80} />
+            <TippaLogo size={160} />
           </View>
 
           {/* Welcome Message */}

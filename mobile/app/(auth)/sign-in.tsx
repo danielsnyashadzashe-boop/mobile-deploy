@@ -109,7 +109,7 @@ export default function SignInScreen() {
           end={{ x: 1, y: 1 }}
         >
           <View style={styles.logoContainer}>
-            <TippaLogo size={60} />
+            <TippaLogo size={220} />
           </View>
           <Text style={styles.title}>Welcome Back</Text>
           <Text style={styles.subtitle}>Sign in to Tippa CarGuard</Text>
@@ -226,7 +226,7 @@ const styles = StyleSheet.create({
   container:       { flex: 1, backgroundColor: '#F8F9FA' },
   scrollContainer: { flexGrow: 1 },
   header: {
-    paddingTop: 60, paddingBottom: 60, paddingHorizontal: 24,
+    paddingTop: 32, paddingBottom: 24, paddingHorizontal: 24,
     borderBottomLeftRadius: 30, borderBottomRightRadius: 30, alignItems: 'center',
   },
   logoContainer: { marginBottom: 16 },

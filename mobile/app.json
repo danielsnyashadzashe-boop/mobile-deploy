@@ -4,11 +4,12 @@
     "slug": "tippa-carguard",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
     "scheme": "tippa",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/Tippa Logo.png",
+      "image": "./assets/images/TippaLogoPNG.png",
       "resizeMode": "contain",
       "backgroundColor": "#10B981"
     },
@@ -18,7 +19,11 @@
     },
     "android": {
       "package": "com.nogada.tippa.carguard",
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#10B981"
+      }
     },
     "web": {
       "bundler": "metro"
