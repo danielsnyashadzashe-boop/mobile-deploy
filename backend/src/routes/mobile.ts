@@ -195,13 +195,11 @@ router.post('/guards/link-mobile-account', async (req: Request, res: Response) =
       })
     }
 
-    // Link the account
+    // Link the account — access code stays until admin explicitly regenerates it
     const updatedGuard = await prisma.carGuard.update({
       where: { id: guard.id },
       data: {
         clerkUserId,
-        accessCode: null, // Clear the access code after linking
-        accessCodeExpiry: null,
         status: 'ACTIVE'
       },
       include: {

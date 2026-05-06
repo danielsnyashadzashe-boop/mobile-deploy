@@ -83,12 +83,10 @@ router.post('/auth/login', async (req: Request, res: Response) => {
       })
     }
 
-    // Clear the access code so it can't be reused
+    // Update lastActiveAt only — access code stays until admin explicitly regenerates it
     await prisma.carGuard.update({
       where: { id: guard.id },
       data: {
-        accessCode: null,
-        accessCodeExpiry: null,
         lastActiveAt: new Date()
       }
     })
