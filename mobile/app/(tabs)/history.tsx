@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar, DateData } from 'react-native-calendars';
-import { MotiView, MotiText } from 'moti';
+import Reanimated, { FadeInDown, FadeIn, ZoomIn } from 'react-native-reanimated';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatDate } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
@@ -37,25 +37,15 @@ function Spinner() {
   }, []);
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
   return (
-    <MotiView
-      from={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: 'spring', duration: 400 }}
-      style={hStyles.spinnerWrap}
-    >
+    <Reanimated.View entering={ZoomIn.duration(400)} style={hStyles.spinnerWrap}>
       <Animated.View style={[hStyles.spinnerRing, { transform: [{ rotate }] }]} />
       <View style={hStyles.spinnerInner}>
         <Ionicons name="receipt-outline" size={24} color="#5B94D3" />
       </View>
-      <MotiText
-        from={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ type: 'timing', duration: 600, delay: 200 }}
-        style={hStyles.spinnerText}
-      >
+      <Reanimated.Text entering={FadeIn.delay(300).duration(600)} style={hStyles.spinnerText}>
         Loading transactions...
-      </MotiText>
-    </MotiView>
+      </Reanimated.Text>
+    </Reanimated.View>
   );
 }
 
@@ -72,12 +62,7 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
   const hasCommission = (item as any).metadata?.commissionAmount > 0;
 
   return (
-    <MotiView
-      from={{ opacity: 0, translateY: 16 }}
-      animate={{ opacity: 1, translateY: 0 }}
-      transition={{ type: 'spring', delay: index * 40, damping: 18 }}
-      style={hStyles.txRow}
-    >
+    <Reanimated.View entering={FadeInDown.delay(index * 40).springify().damping(18)} style={hStyles.txRow}>
       <View style={[hStyles.txIcon, { backgroundColor: icon.color + '20' }]}>
         <Ionicons name={icon.name as any} size={16} color={icon.color} />
       </View>
@@ -113,7 +98,7 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
           </View>
         )}
       </View>
-    </MotiView>
+    </Reanimated.View>
   );
 }
 
@@ -279,12 +264,7 @@ export default function HistoryScreen() {
         <LinearGradient colors={['#5B94D3', '#11468F']} style={hStyles.header}>
           <Text style={hStyles.headerTitle}>History</Text>
           <Text style={hStyles.headerSub}>Your transaction overview</Text>
-          <MotiView
-            from={{ opacity: 0, translateY: 10 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ type: 'spring', delay: 100 }}
-            style={hStyles.summaryRow}
-          >
+          <Reanimated.View entering={FadeInDown.delay(100).springify()} style={hStyles.summaryRow}>
             {[
               { label: 'Income',   amount: income,            color: '#6EE7B7', icon: 'arrow-down-circle-outline' },
               { label: 'Expenses', amount: expenses,          color: '#FCA5A5', icon: 'arrow-up-circle-outline' },
@@ -301,7 +281,7 @@ export default function HistoryScreen() {
                 </View>
               </React.Fragment>
             ))}
-          </MotiView>
+          </Reanimated.View>
         </LinearGradient>
 
         {/* ── Filter bar ── */}
@@ -313,19 +293,14 @@ export default function HistoryScreen() {
               <Ionicons name={showPeriodDropdown ? 'chevron-up' : 'chevron-down'} size={14} color="#9CA3AF" />
             </TouchableOpacity>
             {showPeriodDropdown && (
-              <MotiView
-                from={{ opacity: 0, translateY: -8 }}
-                animate={{ opacity: 1, translateY: 0 }}
-                transition={{ type: 'timing', duration: 180 }}
-                style={hStyles.dropdown}
-              >
+              <Reanimated.View entering={FadeInDown.duration(180)} style={hStyles.dropdown}>
                 {periodOptions.map(p => (
                   <TouchableOpacity key={p} onPress={() => { setSelectedPeriod(p); setShowPeriodDropdown(false); setCurrentPage(1); }} style={[hStyles.dropdownItem, p === selectedPeriod && hStyles.dropdownItemActive]}>
                     <Text style={[hStyles.dropdownText, p === selectedPeriod && hStyles.dropdownTextActive]}>{p}</Text>
                     {p === selectedPeriod && <Ionicons name="checkmark" size={14} color="#5B94D3" />}
                   </TouchableOpacity>
                 ))}
-              </MotiView>
+              </Reanimated.View>
             )}
           </View>
           <TouchableOpacity style={hStyles.customBtn} onPress={() => { clearCalendar(); setShowCalendar(true); }} activeOpacity={0.7}>
@@ -357,20 +332,20 @@ export default function HistoryScreen() {
           contentContainerStyle={{ paddingBottom: 20, flexGrow: 1 }}
           ListEmptyComponent={
             loading ? <Spinner /> : error ? (
-              <MotiView from={{ opacity: 0 }} animate={{ opacity: 1 }} style={hStyles.centeredState}>
+              <Reanimated.View entering={FadeIn} style={hStyles.centeredState}>
                 <View style={hStyles.stateIconBg}><Ionicons name="alert-circle-outline" size={32} color="#DC2626" /></View>
                 <Text style={[hStyles.stateTitle, { color: '#DC2626' }]}>Unable to load</Text>
                 <Text style={hStyles.stateText}>{error}</Text>
                 <TouchableOpacity style={hStyles.retryBtn} onPress={loadData}>
                   <Text style={hStyles.retryText}>Try Again</Text>
                 </TouchableOpacity>
-              </MotiView>
+              </Reanimated.View>
             ) : (
-              <MotiView from={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring' }} style={hStyles.centeredState}>
+              <Reanimated.View entering={ZoomIn.springify()} style={hStyles.centeredState}>
                 <View style={hStyles.stateIconBg}><Ionicons name="receipt-outline" size={32} color="#9CA3AF" /></View>
                 <Text style={hStyles.stateTitle}>No transactions</Text>
                 <Text style={hStyles.stateText}>No {selectedFilter !== 'all' ? selectedFilter + ' ' : ''}transactions for {selectedPeriod}.</Text>
-              </MotiView>
+              </Reanimated.View>
             )
           }
         />
@@ -391,12 +366,7 @@ export default function HistoryScreen() {
         {/* ── Calendar Modal ── */}
         <Modal visible={showCalendar} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowCalendar(false)}>
           <View style={hStyles.sheetBackdrop}>
-            <MotiView
-              from={{ translateY: 80, opacity: 0 }}
-              animate={{ translateY: 0, opacity: 1 }}
-              transition={{ type: 'spring', damping: 20, stiffness: 200 }}
-              style={hStyles.sheet}
-            >
+            <Reanimated.View entering={FadeInDown.springify().damping(20)} style={hStyles.sheet}>
               <View style={hStyles.sheetHandle} />
               <View style={hStyles.sheetHeader}>
                 <Text style={hStyles.sheetTitle}>Pick Date Range</Text>
@@ -406,12 +376,7 @@ export default function HistoryScreen() {
               </View>
 
               {/* Step indicator */}
-              <MotiView
-                from={{ opacity: 0, translateX: -10 }}
-                animate={{ opacity: 1, translateX: 0 }}
-                transition={{ type: 'timing', duration: 300, delay: 100 }}
-                style={hStyles.stepRow}
-              >
+              <Reanimated.View entering={FadeIn.delay(100).duration(300)} style={hStyles.stepRow}>
                 <View style={[hStyles.stepDot, calendarStep === 'start' && hStyles.stepDotActive]}>
                   <Text style={[hStyles.stepDotText, calendarStep === 'start' && { color: '#fff' }]}>1</Text>
                 </View>
@@ -422,16 +387,11 @@ export default function HistoryScreen() {
                 <Text style={hStyles.stepHint}>
                   {calendarStep === 'start' ? 'Tap to select start date' : 'Tap to select end date'}
                 </Text>
-              </MotiView>
+              </Reanimated.View>
 
               {/* Selected range display */}
               {(customStartDate || customEndDate) && (
-                <MotiView
-                  from={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ type: 'spring', damping: 16 }}
-                  style={hStyles.rangeDisplay}
-                >
+                <Reanimated.View entering={ZoomIn.springify().damping(16)} style={hStyles.rangeDisplay}>
                   <View style={hStyles.rangeItem}>
                     <Text style={hStyles.rangeLabel}>From</Text>
                     <Text style={hStyles.rangeDate}>{customStartDate || '—'}</Text>
@@ -441,7 +401,7 @@ export default function HistoryScreen() {
                     <Text style={hStyles.rangeLabel}>To</Text>
                     <Text style={hStyles.rangeDate}>{customEndDate || '—'}</Text>
                   </View>
-                </MotiView>
+                </Reanimated.View>
               )}
 
               <Calendar
@@ -514,7 +474,7 @@ export default function HistoryScreen() {
                   <Text style={hStyles.applyText}>Apply Range</Text>
                 </TouchableOpacity>
               </View>
-            </MotiView>
+            </Reanimated.View>
           </View>
         </Modal>
 
