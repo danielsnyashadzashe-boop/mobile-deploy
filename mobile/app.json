@@ -9,9 +9,9 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/Tippa Logo.png",
+      "image": "./assets/images/TippaLogoPNG.png",
       "resizeMode": "cover",
-      "backgroundColor": "#C8F500"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
