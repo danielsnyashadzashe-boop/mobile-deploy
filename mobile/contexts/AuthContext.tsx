@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { GuardData } from './GuardContext';
 
@@ -119,6 +118,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       if (Platform.OS === 'web') return;
 
+      // Dynamic import so a missing native module doesn't crash the app
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Notifications = require('expo-notifications');
+
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
 
@@ -140,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       console.log('📱 Push token registered');
     } catch (e) {
-      console.log('Push token registration skipped:', e);
+      console.log('Push token registration skipped (rebuild required):', e);
     }
   };
 
