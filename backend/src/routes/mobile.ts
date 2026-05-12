@@ -1114,6 +1114,104 @@ router.put('/mobile/me/profile', mobileAuth, async (req: Request, res: Response)
 })
 
 /**
+ * POST /api/mobile/me/push-token
+ * Register or update the guard's Expo push token
+ */
+router.post('/mobile/me/push-token', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const { pushToken } = req.body
+    const guardId = req.guard!.guardId
+
+    if (!pushToken || typeof pushToken !== 'string') {
+      return res.status(400).json({ success: false, error: 'pushToken is required' })
+    }
+
+    await prisma.carGuard.update({
+      where: { id: guardId },
+      data: { pushToken },
+    })
+
+    console.log('📱 Push token registered for guard:', guardId)
+    return res.json({ success: true })
+  } catch (error) {
+    console.error('❌ Error saving push token:', error)
+    return res.status(500).json({ success: false, error: 'Failed to save push token' })
+  }
+})
+
+/**
+ * GET /api/mobile/me/notifications
+ * Get the logged-in guard's notifications (newest first)
+ */
+router.get('/mobile/me/notifications', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+    const { limit = '30' } = req.query
+
+    const guard = await prisma.carGuard.findUnique({
+      where: { id: guardId },
+      select: { userId: true },
+    })
+
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    const notifications = await prisma.notification.findMany({
+      where: { userId: guard.userId },
+      orderBy: { createdAt: 'desc' },
+      take: parseInt(limit as string),
+    })
+
+    const unreadCount = notifications.filter(n => !n.readAt).length
+
+    return res.json({
+      success: true,
+      data: {
+        notifications: notifications.map(n => ({
+          id: n.id,
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          read: !!n.readAt,
+          createdAt: n.createdAt.toISOString(),
+          metadata: n.metadata || null,
+        })),
+        unreadCount,
+      },
+    })
+  } catch (error) {
+    console.error('❌ Error fetching notifications:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch notifications' })
+  }
+})
+
+/**
+ * POST /api/mobile/me/notifications/read-all
+ * Mark all notifications as read
+ */
+router.post('/mobile/me/notifications/read-all', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+
+    const guard = await prisma.carGuard.findUnique({
+      where: { id: guardId },
+      select: { userId: true },
+    })
+
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    await prisma.notification.updateMany({
+      where: { userId: guard.userId, readAt: null },
+      data: { readAt: new Date() },
+    })
+
+    return res.json({ success: true })
+  } catch (error) {
+    console.error('❌ Error marking notifications as read:', error)
+    return res.status(500).json({ success: false, error: 'Failed to update notifications' })
+  }
+})
+
+/**
  * GET /api/mobile/me/auto-payout-settings
  * Returns the effective auto-payout settings for the logged-in guard.
  * Reads global settings from Settings collection, then checks per-guard override on CarGuard.

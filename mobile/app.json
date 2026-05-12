@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Tippa CarGuard",
+    "name": "Tippa Mobile Solutions",
     "slug": "tippa-carguard",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -31,7 +31,14 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#5B94D3"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

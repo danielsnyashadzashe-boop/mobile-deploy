@@ -1,7 +1,270 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
+import { sendExpoPush } from '../lib/expoPush'
 
 const router = Router()
+
+// ─── Helper: create a notification record + send push ───────────────────────
+async function notifyGuard(
+  guardInternalId: string,
+  type: string,
+  title: string,
+  message: string,
+  metadata?: Record<string, unknown>
+) {
+  const guard = await prisma.carGuard.findUnique({
+    where: { id: guardInternalId },
+    select: { userId: true, pushToken: true },
+  })
+  if (!guard) return
+
+  const notificationId = `NOTIF-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+
+  await prisma.notification.create({
+    data: {
+      userId: guard.userId,
+      guardId: guardInternalId,
+      notificationId,
+      type,
+      channel: 'PUSH',
+      title,
+      message,
+      status: 'SENT',
+      metadata: metadata ? (metadata as any) : null,
+    },
+  })
+
+  if (guard.pushToken) {
+    await sendExpoPush(guard.pushToken, title, message, { type, ...metadata })
+  }
+}
+
+// ─── Payout admin endpoints ──────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/payout-requests
+ * List payout requests (optionally filtered by status)
+ */
+router.get('/payout-requests', async (req: Request, res: Response) => {
+  try {
+    const { status, limit = '50', offset = '0' } = req.query
+
+    const where: any = {}
+    if (status && status !== 'all') where.status = String(status).toUpperCase()
+
+    const [payouts, total] = await Promise.all([
+      prisma.payout.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: parseInt(limit as string),
+        skip: parseInt(offset as string),
+        include: {
+          guard: {
+            select: {
+              guardId: true,
+              name: true,
+              surname: true,
+              phone: true,
+              bankName: true,
+              accountNumber: true,
+              branchCode: true,
+              accountType: true,
+              balance: true,
+            },
+          },
+        },
+      }),
+      prisma.payout.count({ where }),
+    ])
+
+    return res.json({
+      success: true,
+      data: {
+        payouts: payouts.map(p => ({
+          id: p.id,
+          payoutId: p.payoutId || `PAY-${p.id.slice(-8).toUpperCase()}`,
+          amount: p.amount,
+          status: p.status,
+          method: p.method,
+          notes: p.notes,
+          adminNotes: p.adminNotes,
+          rejectionReason: p.rejectionReason,
+          requestedAt: p.createdAt.toISOString(),
+          approvedAt: p.approvedAt?.toISOString() || null,
+          processedAt: p.processedAt?.toISOString() || null,
+          completedAt: p.completedAt?.toISOString() || null,
+          guard: p.guard,
+        })),
+        total,
+      },
+    })
+  } catch (error) {
+    console.error('❌ Error fetching payout requests:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch payout requests' })
+  }
+})
+
+/**
+ * POST /api/admin/payout-requests/:id/approve
+ * Approve a payout — deduct from guard balance, notify guard
+ */
+router.post('/payout-requests/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { adminId, adminNotes } = req.body
+
+    const payout = await prisma.payout.findUnique({
+      where: { id },
+      include: { guard: { select: { id: true, balance: true, guardId: true } } },
+    })
+
+    if (!payout) return res.status(404).json({ success: false, error: 'Payout request not found' })
+    if (payout.status !== 'PENDING') {
+      return res.status(400).json({ success: false, error: `Cannot approve a payout with status: ${payout.status}` })
+    }
+
+    const guard = payout.guard
+    if (guard.balance < payout.amount) {
+      return res.status(400).json({ success: false, error: 'Guard has insufficient balance' })
+    }
+
+    const newBalance = guard.balance - payout.amount
+
+    // Update payout + deduct balance atomically
+    await prisma.$transaction([
+      prisma.payout.update({
+        where: { id },
+        data: {
+          status: 'APPROVED',
+          approvedAt: new Date(),
+          approvedBy: adminId || null,
+          adminNotes: adminNotes || null,
+          processedAt: new Date(),
+        },
+      }),
+      prisma.carGuard.update({
+        where: { id: guard.id },
+        data: { balance: newBalance },
+      }),
+      prisma.transaction.create({
+        data: {
+          guardId: guard.id,
+          type: 'PAYOUT',
+          amount: -payout.amount,
+          description: `Payout approved: R${payout.amount.toFixed(2)}`,
+          status: 'COMPLETED',
+          balance: newBalance,
+          reference: payout.payoutId || id,
+        },
+      }),
+    ])
+
+    await notifyGuard(
+      guard.id,
+      'PAYOUT_APPROVED',
+      'Payout Approved',
+      `Your payout of R${payout.amount.toFixed(2)} has been approved and is being processed.`,
+      { payoutId: payout.payoutId || id, amount: payout.amount }
+    )
+
+    console.log('✅ Payout approved:', id, 'Guard:', guard.guardId)
+    return res.json({ success: true, message: 'Payout approved successfully' })
+  } catch (error) {
+    console.error('❌ Error approving payout:', error)
+    return res.status(500).json({ success: false, error: 'Failed to approve payout' })
+  }
+})
+
+/**
+ * POST /api/admin/payout-requests/:id/reject
+ * Reject a payout request
+ */
+router.post('/payout-requests/:id/reject', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { adminId, reason } = req.body
+
+    if (!reason) return res.status(400).json({ success: false, error: 'Rejection reason is required' })
+
+    const payout = await prisma.payout.findUnique({
+      where: { id },
+      include: { guard: { select: { id: true, guardId: true } } },
+    })
+
+    if (!payout) return res.status(404).json({ success: false, error: 'Payout request not found' })
+    if (payout.status !== 'PENDING') {
+      return res.status(400).json({ success: false, error: `Cannot reject a payout with status: ${payout.status}` })
+    }
+
+    await prisma.payout.update({
+      where: { id },
+      data: {
+        status: 'REJECTED',
+        rejectionReason: reason,
+        approvedBy: adminId || null,
+      },
+    })
+
+    await notifyGuard(
+      payout.guard.id,
+      'PAYOUT_REJECTED',
+      'Payout Not Approved',
+      `Your payout of R${payout.amount.toFixed(2)} was not approved. Reason: ${reason}`,
+      { payoutId: payout.payoutId || id, amount: payout.amount, reason }
+    )
+
+    console.log('✅ Payout rejected:', id, 'Guard:', payout.guard.guardId)
+    return res.json({ success: true, message: 'Payout rejected' })
+  } catch (error) {
+    console.error('❌ Error rejecting payout:', error)
+    return res.status(500).json({ success: false, error: 'Failed to reject payout' })
+  }
+})
+
+/**
+ * POST /api/admin/payout-requests/:id/ewallet-sent
+ * Mark payout as completed/sent — notify guard to check their messages
+ */
+router.post('/payout-requests/:id/ewallet-sent', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { adminId, notes } = req.body
+
+    const payout = await prisma.payout.findUnique({
+      where: { id },
+      include: { guard: { select: { id: true, guardId: true } } },
+    })
+
+    if (!payout) return res.status(404).json({ success: false, error: 'Payout request not found' })
+    if (!['APPROVED', 'PROCESSING'].includes(payout.status)) {
+      return res.status(400).json({ success: false, error: `Cannot mark as sent a payout with status: ${payout.status}` })
+    }
+
+    await prisma.payout.update({
+      where: { id },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        adminNotes: notes || payout.adminNotes,
+        approvedBy: adminId || payout.approvedBy,
+      },
+    })
+
+    await notifyGuard(
+      payout.guard.id,
+      'PAYOUT_SENT',
+      'Payment Sent',
+      `Your payout of R${payout.amount.toFixed(2)} has been sent. Check your messages.`,
+      { payoutId: payout.payoutId || id, amount: payout.amount }
+    )
+
+    console.log('✅ Payout marked as sent:', id, 'Guard:', payout.guard.guardId)
+    return res.json({ success: true, message: 'Payout marked as sent' })
+  } catch (error) {
+    console.error('❌ Error marking payout as sent:', error)
+    return res.status(500).json({ success: false, error: 'Failed to update payout' })
+  }
+})
 
 /**
  * POST /api/admin/registration/:id/approve

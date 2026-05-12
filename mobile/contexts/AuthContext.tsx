@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import { GuardData } from './GuardContext';
 
 const TOKEN_KEY = 'tippa_jwt';
@@ -103,10 +105,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(data.token);
       setGuard(data.guard);
 
+      // Register push token in background (non-blocking)
+      registerPushToken(data.token).catch(() => {});
+
       return { success: true };
     } catch (e) {
       console.error('Login error:', e);
       return { success: false, error: 'Could not connect to server. Please check your connection.' };
+    }
+  };
+
+  const registerPushToken = async (jwt: string) => {
+    try {
+      if (Platform.OS === 'web') return;
+
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') return;
+
+      const tokenData = await Notifications.getExpoPushTokenAsync();
+      const pushToken = tokenData.data;
+
+      await fetch(`${API_URL}/api/mobile/me/push-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ pushToken }),
+      });
+
+      console.log('📱 Push token registered');
+    } catch (e) {
+      console.log('Push token registration skipped:', e);
     }
   };
 

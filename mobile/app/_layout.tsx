@@ -4,9 +4,22 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { AuthProvider } from '../contexts/AuthContext';
 import { GuardProvider } from '../contexts/GuardContext';
+import { NotificationProvider } from '../contexts/NotificationContext';
 import '../global.css';
+
+// Show notifications as banners when app is in foreground
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 
 export default function RootLayout() {
@@ -33,14 +46,27 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <GuardProvider>
-        <SafeAreaProvider>
-          <StatusBar style="dark" backgroundColor="#ffffff" translucent={false} />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(tabs)" />
-          </Stack>
-        </SafeAreaProvider>
+        <NotificationProvider>
+          <SafeAreaProvider>
+            <StatusBar style="dark" backgroundColor="#ffffff" translucent={false} />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="index" />
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen
+                name="notifications"
+                options={{
+                  headerShown: true,
+                  title: 'Notifications',
+                  headerStyle: { backgroundColor: '#5B94D3' },
+                  headerTintColor: '#fff',
+                  headerTitleStyle: { fontFamily: 'Nunito-Bold', fontSize: 18 },
+                  presentation: 'card',
+                }}
+              />
+            </Stack>
+          </SafeAreaProvider>
+        </NotificationProvider>
       </GuardProvider>
     </AuthProvider>
   );

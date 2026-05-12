@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Image,
   Modal,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,6 +22,7 @@ import { formatCurrency } from '../../data/mockData';
 import { TippaLogo } from '../../components/TippaLogo';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuard } from '../../contexts/GuardContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import { getTransactions } from '../../services/mobileApiService';
 
 type AlertModalState = { visible: boolean; type: 'success' | 'error' | 'info'; title: string; message: string };
@@ -29,6 +31,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { guard: authGuard, token, refreshGuard } = useAuth();
   const { guardData: rawGuardData, isLoading: guardLoading } = useGuard();
+  const { unreadCount } = useNotifications();
   const guardData = rawGuardData ?? (authGuard ? {
     id: authGuard.guardId,
     guardId: authGuard.guardPublicId,
@@ -199,11 +202,27 @@ export default function DashboardScreen() {
       >
         {/* Header with Logo */}
         <LinearGradient colors={['#5B94D3', '#11468F']} className="px-6 pt-4 pb-8">
+          {/* Bell icon row */}
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 }}>
+            <TouchableOpacity
+              onPress={() => router.push('/notifications')}
+              style={bellStyles.btn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="notifications-outline" size={22} color="#fff" />
+              {unreadCount > 0 && (
+                <View style={bellStyles.badge}>
+                  <Text style={bellStyles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
           <View className="items-center mb-6">
             <TippaLogo size={160} />
           </View>
           <View className="items-center mb-6">
-            <Text className="text-white/80 text-sm">Welcome back,</Text>
+            <Text className="text-white/80 text-sm">Tippa Payment Solutions</Text>
             <Text className="text-white text-2xl font-bold">
               {guardData?.fullName || authGuard?.phone || 'Guard'}
             </Text>
@@ -406,7 +425,7 @@ export default function DashboardScreen() {
           <View style={{ position: 'absolute', top: 80, alignItems: 'center' }}>
             <TippaLogo size={60} />
             <Text style={{ fontSize: 18, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#111827', marginTop: 12 }}>Scan to Tip</Text>
-            <Text style={{ fontSize: 14, fontFamily: 'Nunito-Regular', color: '#6b7280', marginTop: 4 }}>{guardData?.fullName || authGuard?.phone || 'Car Guard'}</Text>
+            <Text style={{ fontSize: 14, fontFamily: 'Nunito-Regular', color: '#6b7280', marginTop: 4 }}>{guardData?.fullName || authGuard?.phone || 'Guard'}</Text>
           </View>
           <View style={{ backgroundColor: '#ffffff', padding: 16, borderRadius: 24, borderWidth: 4, borderColor: '#5B94D3', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5 }}>
             {guardData?.qrCodeUrl ? (
@@ -467,3 +486,32 @@ export default function DashboardScreen() {
     </SafeAreaView>
   );
 }
+
+const bellStyles = StyleSheet.create({
+  btn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+    fontFamily: 'Nunito-Bold',
+  },
+});
