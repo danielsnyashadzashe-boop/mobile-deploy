@@ -6,19 +6,31 @@ const router = Router()
 
 /**
  * POST /api/communications/notifications/send
- * Send a push notification from admin to one guard or all guards
- * Body: { guardId?, all?, title, message, type? }
+ * Send a push notification from admin to one guard or all guards.
+ * Accepts both formats:
+ *   - Web admin format: { recipient?, recipientType, title, message, type? }
+ *   - Direct format:    { guardId?, all?, title, message, type? }
  */
 router.post('/notifications/send', async (req: Request, res: Response) => {
   try {
-    const { guardId, all, title, message, type = 'ADMIN_MESSAGE' } = req.body
+    const {
+      // Web admin format
+      recipient, recipientType,
+      // Direct format
+      guardId: directGuardId, all: directAll,
+      // Common
+      title, message, type = 'ADMIN_MESSAGE',
+    } = req.body
 
     if (!title || !message) {
       return res.status(400).json({ success: false, error: 'title and message are required' })
     }
 
-    if (all) {
-      // Broadcast to all active guards with a push token
+    // Resolve target from either format
+    const targetGuardId: string | undefined = recipient || directGuardId
+    const isBroadcast: boolean = directAll === true || (recipientType === 'all' && !recipient)
+
+    if (isBroadcast) {
       const guards = await prisma.carGuard.findMany({
         where: { status: 'ACTIVE', pushToken: { not: null } },
         select: { id: true },
@@ -32,25 +44,20 @@ router.post('/notifications/send', async (req: Request, res: Response) => {
       return res.json({ success: true, sent: guards.length })
     }
 
-    if (guardId) {
-      // Find guard by guardId field or internal id
+    if (targetGuardId) {
       const guard = await prisma.carGuard.findFirst({
-        where: {
-          OR: [
-            { guardId },
-            { id: guardId },
-          ],
-        },
+        where: { OR: [{ guardId: targetGuardId }, { id: targetGuardId }] },
         select: { id: true },
       })
 
       if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
 
       await notifyGuard(guard.id, type, title, message)
+      console.log(`📩 Admin message sent to guard: ${targetGuardId}`)
       return res.json({ success: true, sent: 1 })
     }
 
-    return res.status(400).json({ success: false, error: 'Provide guardId or set all: true' })
+    return res.status(400).json({ success: false, error: 'Provide a recipient guard ID or set recipientType to "all"' })
   } catch (error) {
     console.error('❌ Error sending notification:', error)
     return res.status(500).json({ success: false, error: 'Failed to send notification' })
