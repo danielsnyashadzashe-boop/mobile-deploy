@@ -14,6 +14,7 @@ import payoutsRoutes from './routes/payouts'
 import flashRoutes from './routes/flash'
 import clerkWebhookRoutes from './routes/clerk-webhook'
 import authRoutes from './routes/auth'
+import communicationsRoutes from './routes/communications'
 
 // Load environment variables
 dotenv.config()
@@ -49,6 +50,7 @@ app.use('/api', mobileRoutes)         // Mobile app endpoints
 app.use('/api', payoutsRoutes)        // 1Voucher and payout endpoints
 app.use('/api', flashRoutes)          // Flash API endpoints (airtime, electricity)
 app.use('/api/webhooks', clerkWebhookRoutes) // Clerk webhooks for user sync
+app.use('/api/communications', communicationsRoutes) // Admin-to-guard messaging
 
 // 404 handler
 app.use((req: Request, res: Response) => {

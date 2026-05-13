@@ -1,6 +1,7 @@
 import express, { Request, Response, Router } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { getNetcashServiceKey } from '../lib/settings'
+import { notifyGuard } from '../lib/notifications'
 
 const router: Router = express.Router()
 const prisma = new PrismaClient()
@@ -120,6 +121,15 @@ router.post('/tips', async (req: Request, res: Response) => {
         }
       })
     }
+
+    // Notify guard of tip received (non-blocking)
+    notifyGuard(
+      guard.id,
+      'TIP_RECEIVED',
+      'You received a tip!',
+      `R${guardReceivesAmount.toFixed(2)} has been added to your balance.`,
+      { amount: guardReceivesAmount, newBalance: updatedGuard.balance }
+    ).catch(() => {})
 
     res.status(201).json({
       success: true,
@@ -385,6 +395,14 @@ async function processTipInternal(data: any) {
       }
     })
   }
+
+  notifyGuard(
+    guard.id,
+    'TIP_RECEIVED',
+    'You received a tip!',
+    `R${guardReceivesAmount.toFixed(2)} has been added to your balance.`,
+    { amount: guardReceivesAmount, newBalance: updatedGuard.balance }
+  ).catch(() => {})
 
   return {
     tipId: tip.id,
