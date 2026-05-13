@@ -1,0 +1,10 @@
+# Markdown docs — local only
+*.md
+wiki/
+
+# Logs
+debug.log
+*.log
+
+# Node
+node_modules/
