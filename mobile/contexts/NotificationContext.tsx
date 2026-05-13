@@ -32,7 +32,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const fetchNotifications = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/mobile/me/notifications`, {
+      const res = await fetch(`${API_URL}/api/mobile/me/notifications?limit=50`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;

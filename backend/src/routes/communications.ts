@@ -19,7 +19,7 @@ router.post('/notifications/send', async (req: Request, res: Response) => {
       // Direct format
       guardId: directGuardId, all: directAll,
       // Common
-      title, message, type = 'ADMIN_MESSAGE',
+      title, message,
     } = req.body
 
     if (!title || !message) {
@@ -37,7 +37,7 @@ router.post('/notifications/send', async (req: Request, res: Response) => {
       })
 
       await Promise.allSettled(
-        guards.map(g => notifyGuard(g.id, type, title, message))
+        guards.map(g => notifyGuard(g.id, 'ADMIN_MESSAGE', title, message))
       )
 
       console.log(`📢 Admin broadcast sent to ${guards.length} guards`)
@@ -52,7 +52,7 @@ router.post('/notifications/send', async (req: Request, res: Response) => {
 
       if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
 
-      await notifyGuard(guard.id, type, title, message)
+      await notifyGuard(guard.id, 'ADMIN_MESSAGE', title, message)
       console.log(`📩 Admin message sent to guard: ${targetGuardId}`)
       return res.json({ success: true, sent: 1 })
     }

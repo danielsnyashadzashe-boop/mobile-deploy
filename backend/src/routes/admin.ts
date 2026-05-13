@@ -4,6 +4,57 @@ import { notifyGuard } from '../lib/notifications'
 
 const router = Router()
 
+// ─── Guard listing ───────────────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/guards
+ * List guards with optional filters (status, search, limit, page)
+ */
+router.get('/guards', async (req: Request, res: Response) => {
+  try {
+    const { status, search, limit = '100', page = '1' } = req.query
+    const take = parseInt(limit as string)
+    const skip = (parseInt(page as string) - 1) * take
+
+    const where: any = {}
+    if (status && status !== 'all') where.status = String(status).toUpperCase()
+    if (search) {
+      const s = String(search)
+      where.OR = [
+        { name: { contains: s, mode: 'insensitive' } },
+        { surname: { contains: s, mode: 'insensitive' } },
+        { guardId: { contains: s, mode: 'insensitive' } },
+        { phone: { contains: s, mode: 'insensitive' } },
+      ]
+    }
+
+    const [guards, total] = await Promise.all([
+      prisma.carGuard.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        take,
+        skip,
+        select: {
+          id: true,
+          guardId: true,
+          name: true,
+          surname: true,
+          phone: true,
+          status: true,
+          balance: true,
+          location: { select: { name: true, city: true } },
+        },
+      }),
+      prisma.carGuard.count({ where }),
+    ])
+
+    return res.json({ success: true, data: { guards, total } })
+  } catch (error) {
+    console.error('❌ Error fetching guards:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch guards' })
+  }
+})
+
 // ─── Payout admin endpoints ──────────────────────────────────────────────────
 
 /**

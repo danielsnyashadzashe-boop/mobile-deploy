@@ -17,6 +17,7 @@ const TYPE_CONFIG: Record<string, { icon: keyof typeof Ionicons.glyphMap; color:
   PAYOUT_REJECTED: { icon: 'close-circle', color: '#EF4444', bg: '#FEF2F2' },
   PAYOUT_SENT:     { icon: 'send', color: '#5B94D3', bg: '#EFF6FF' },
   TIP_RECEIVED:    { icon: 'cash', color: '#F59E0B', bg: '#FFFBEB' },
+  ADMIN_MESSAGE:   { icon: 'megaphone', color: '#8B5CF6', bg: '#F5F3FF' },
   DEFAULT:         { icon: 'notifications', color: '#6B7280', bg: '#F3F4F6' },
 };
 

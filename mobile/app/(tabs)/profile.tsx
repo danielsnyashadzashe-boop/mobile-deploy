@@ -334,7 +334,7 @@ export default function ProfileScreen() {
               visible: true,
               type: 'info',
               title: 'Help & Support',
-              message: 'For any issues, questions, or assistance with your Tippa CarGuard account, please contact your manager or supervisor directly.\n\nYour manager has access to the admin portal and can assist with:\n• Account issues\n• Balance queries\n• Payout requests\n• Access code resets\n\nFor technical issues with the app, ask your manager to contact Ionic Innovate support.',
+              message: 'For any issues, questions, or assistance with your Tippa Mobile Solutions account, please contact your manager or supervisor directly.\n\nYour manager has access to the admin portal and can assist with:\n• Account issues\n• Balance queries\n• Payout requests\n• Access code resets\n\nFor technical issues with the app, ask your manager to contact Ionic Innovate support.',
             })}
             activeOpacity={0.6}
           >
@@ -350,8 +350,8 @@ export default function ProfileScreen() {
             onPress={() => setModal({
               visible: true,
               type: 'info',
-              title: 'About Tippa CarGuard',
-              message: 'Tippa CarGuard v1.0\n\nTippa is a digital tipping platform that allows customers to tip car guards quickly and securely via QR code.\n\nFor more information about the platform, features, or your account setup, please speak to your manager or contact Ionic Innovate.\n\nDeveloped by Ionic Innovate.',
+              title: 'About Tippa Mobile Solutions',
+              message: 'Tippa Mobile Solutions v1.0\n\nTippa is a digital tipping platform that allows customers to tip car guards quickly and securely via QR code.\n\nFor more information about the platform, features, or your account setup, please speak to your manager or contact Ionic Innovate.\n\nDeveloped by Ionic Innovate.',
             })}
             activeOpacity={0.6}
           >
