@@ -1193,6 +1193,7 @@ router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request
               title: 'Tip received',
               message: `R${tx.amount.toFixed(2)} was added to your balance`,
               status: 'SENT',
+              createdAt: tx.createdAt,
               metadata: { amount: tx.amount, transactionId: tx.id, backfilled: true },
             },
           })
@@ -1237,6 +1238,7 @@ router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request
               title,
               message,
               status: 'SENT',
+              createdAt: payout.updatedAt ?? payout.createdAt,
               metadata: { amount: payout.amount, payoutId: pid, status: payout.status, backfilled: true },
             },
           })
@@ -1278,7 +1280,7 @@ router.post('/mobile/me/notifications/test', mobileAuth, async (req: Request, re
 router.get('/mobile/me/notifications', mobileAuth, async (req: Request, res: Response) => {
   try {
     const guardId = req.guard!.guardId
-    const { limit = '30' } = req.query
+    const { limit = '100' } = req.query
 
     // Fetch the guard's userId for fallback (notifications created before guardId was stored)
     const guard = await prisma.carGuard.findUnique({
