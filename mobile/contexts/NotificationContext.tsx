@@ -34,7 +34,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     if (!token) return;
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/mobile/me/notifications?limit=50`, {
+      const res = await fetch(`${API_URL}/api/mobile/me/notifications?limit=100`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -52,7 +52,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             headers: { Authorization: `Bearer ${token}` },
           });
           // Re-fetch after backfill to pick up any newly created records
-          const res2 = await fetch(`${API_URL}/api/mobile/me/notifications?limit=50`, {
+          const res2 = await fetch(`${API_URL}/api/mobile/me/notifications?limit=100`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           const data2 = await res2.json();

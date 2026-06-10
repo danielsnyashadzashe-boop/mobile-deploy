@@ -20,6 +20,8 @@ export async function notifyGuard(
 
     const notificationId = `NOTIF-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
 
+    const eventAt = new Date().toISOString()
+
     await prisma.notification.create({
       data: {
         userId: guard.userId,
@@ -30,7 +32,7 @@ export async function notifyGuard(
         title,
         message,
         status: 'SENT',
-        metadata: metadata ? (metadata as any) : null,
+        metadata: { eventAt, ...(metadata ?? {}) } as any,
       },
     })
 

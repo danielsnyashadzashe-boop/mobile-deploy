@@ -50,6 +50,7 @@ function timeAgo(iso: string): string {
 
 function NotifRow({ item, last }: { item: AppNotification; last?: boolean }) {
   const c = cfg(item.type);
+  const timestamp = (item.metadata?.eventAt as string | undefined) ?? item.createdAt;
   return (
     <View style={[s.row, !last && s.rowBorder, !item.read && s.rowUnread]}>
       {/* unread accent bar */}
@@ -64,7 +65,7 @@ function NotifRow({ item, last }: { item: AppNotification; last?: boolean }) {
       <View style={s.rowBody}>
         <View style={s.rowTop}>
           <Text style={s.rowTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={s.rowTime}>{timeAgo(item.createdAt)}</Text>
+          <Text style={s.rowTime}>{timeAgo(timestamp)}</Text>
         </View>
         <Text style={s.rowType}>{c.label}</Text>
         <Text style={s.rowMessage} numberOfLines={2}>{item.message}</Text>

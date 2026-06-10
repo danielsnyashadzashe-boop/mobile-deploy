@@ -1163,13 +1163,6 @@ router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request
 
     if (txs.length === 0) return res.json({ success: true, created: 0 })
 
-    // Collect all existing notification IDs for this guard to avoid duplicates
-    const existingNotifs = await prisma.notification.findMany({
-      where: { guardId },
-      select: { notificationId: true },
-    })
-    const existingIds = new Set(existingNotifs.map(n => n.notificationId))
-
     // Also get payouts that have been actioned (not just pending)
     const payouts = await prisma.payout.findMany({
       where: { guardId, status: { in: ['APPROVED', 'PROCESSING', 'COMPLETED', 'REJECTED'] } },
@@ -1181,26 +1174,30 @@ router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request
 
     for (const tx of txs) {
       const notifId = `NOTIF-TIP-${tx.id}`
-      if (!existingIds.has(notifId)) {
-        try {
-          await prisma.notification.create({
-            data: {
-              userId: guard.userId,
-              guardId,
-              notificationId: notifId,
-              type: 'TIP_RECEIVED',
-              channel: 'PUSH',
-              title: 'Tip received',
-              message: `R${tx.amount.toFixed(2)} was added to your balance`,
-              status: 'SENT',
-              createdAt: tx.createdAt,
-              metadata: { amount: tx.amount, transactionId: tx.id, backfilled: true },
-            },
-          })
-          created++
-        } catch {
-          // Skip on unique constraint race
-        }
+      const eventAt = tx.createdAt.toISOString()
+      try {
+        await prisma.notification.upsert({
+          where: { notificationId: notifId },
+          create: {
+            userId: guard.userId,
+            guardId,
+            notificationId: notifId,
+            type: 'TIP_RECEIVED',
+            channel: 'PUSH',
+            title: 'Tip received',
+            message: `R${tx.amount.toFixed(2)} was added to your balance`,
+            status: 'SENT',
+            createdAt: tx.createdAt,
+            metadata: { amount: tx.amount, transactionId: tx.id, eventAt, backfilled: true } as any,
+          },
+          update: {
+            createdAt: tx.createdAt,
+            metadata: { amount: tx.amount, transactionId: tx.id, eventAt, backfilled: true } as any,
+          },
+        })
+        created++
+      } catch {
+        // Skip on error
       }
     }
 
@@ -1209,6 +1206,7 @@ router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request
       let type: string
       let title: string
       let message: string
+      const eventDate = payout.updatedAt ?? payout.createdAt
 
       if (payout.status === 'REJECTED') {
         type = 'PAYOUT_REJECTED'
@@ -1219,33 +1217,36 @@ router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request
         title = 'Payout sent!'
         message = `R${payout.amount.toFixed(2)} has been sent to your bank account.`
       } else {
-        // APPROVED or PROCESSING
         type = 'PAYOUT_APPROVED'
         title = 'Payout approved'
         message = `Your R${payout.amount.toFixed(2)} payout request has been approved and is being processed.`
       }
 
       const notifId = `NOTIF-PAYOUT-${payout.status}-${pid}`
-      if (!existingIds.has(notifId)) {
-        try {
-          await prisma.notification.create({
-            data: {
-              userId: guard.userId,
-              guardId,
-              notificationId: notifId,
-              type,
-              channel: 'PUSH',
-              title,
-              message,
-              status: 'SENT',
-              createdAt: payout.updatedAt ?? payout.createdAt,
-              metadata: { amount: payout.amount, payoutId: pid, status: payout.status, backfilled: true },
-            },
-          })
-          created++
-        } catch {
-          // Skip on unique constraint race
-        }
+      const eventAt = eventDate.toISOString()
+      try {
+        await prisma.notification.upsert({
+          where: { notificationId: notifId },
+          create: {
+            userId: guard.userId,
+            guardId,
+            notificationId: notifId,
+            type,
+            channel: 'PUSH',
+            title,
+            message,
+            status: 'SENT',
+            createdAt: eventDate,
+            metadata: { amount: payout.amount, payoutId: pid, status: payout.status, eventAt, backfilled: true } as any,
+          },
+          update: {
+            createdAt: eventDate,
+            metadata: { amount: payout.amount, payoutId: pid, status: payout.status, eventAt, backfilled: true } as any,
+          },
+        })
+        created++
+      } catch {
+        // Skip on error
       }
     }
 
