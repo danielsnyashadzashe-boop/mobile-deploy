@@ -1140,6 +1140,138 @@ router.post('/mobile/me/push-token', mobileAuth, async (req: Request, res: Respo
 })
 
 /**
+ * POST /api/mobile/me/notifications/backfill
+ * One-time backfill: creates TIP_RECEIVED notifications for past tip transactions
+ * that don't already have a notification record.
+ */
+router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+
+    const guard = await prisma.carGuard.findUnique({
+      where: { id: guardId },
+      select: { userId: true },
+    })
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    // Get the last 50 TIP transactions for this guard
+    const txs = await prisma.transaction.findMany({
+      where: { guardId, type: 'TIP' },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+
+    if (txs.length === 0) return res.json({ success: true, created: 0 })
+
+    // Collect all existing notification IDs for this guard to avoid duplicates
+    const existingNotifs = await prisma.notification.findMany({
+      where: { guardId },
+      select: { notificationId: true },
+    })
+    const existingIds = new Set(existingNotifs.map(n => n.notificationId))
+
+    // Also get payouts that have been actioned (not just pending)
+    const payouts = await prisma.payout.findMany({
+      where: { guardId, status: { in: ['APPROVED', 'PROCESSING', 'COMPLETED', 'REJECTED'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+
+    let created = 0
+
+    for (const tx of txs) {
+      const notifId = `NOTIF-TIP-${tx.id}`
+      if (!existingIds.has(notifId)) {
+        try {
+          await prisma.notification.create({
+            data: {
+              userId: guard.userId,
+              guardId,
+              notificationId: notifId,
+              type: 'TIP_RECEIVED',
+              channel: 'PUSH',
+              title: 'Tip received',
+              message: `R${tx.amount.toFixed(2)} was added to your balance`,
+              status: 'SENT',
+              metadata: { amount: tx.amount, transactionId: tx.id, backfilled: true },
+            },
+          })
+          created++
+        } catch {
+          // Skip on unique constraint race
+        }
+      }
+    }
+
+    for (const payout of payouts) {
+      const pid = payout.payoutId || payout.id
+      let type: string
+      let title: string
+      let message: string
+
+      if (payout.status === 'REJECTED') {
+        type = 'PAYOUT_REJECTED'
+        title = 'Payout rejected'
+        message = `Your R${payout.amount.toFixed(2)} payout request was rejected.${payout.rejectionReason ? ' Reason: ' + payout.rejectionReason : ''}`
+      } else if (payout.status === 'COMPLETED') {
+        type = 'PAYOUT_SENT'
+        title = 'Payout sent!'
+        message = `R${payout.amount.toFixed(2)} has been sent to your bank account.`
+      } else {
+        // APPROVED or PROCESSING
+        type = 'PAYOUT_APPROVED'
+        title = 'Payout approved'
+        message = `Your R${payout.amount.toFixed(2)} payout request has been approved and is being processed.`
+      }
+
+      const notifId = `NOTIF-PAYOUT-${payout.status}-${pid}`
+      if (!existingIds.has(notifId)) {
+        try {
+          await prisma.notification.create({
+            data: {
+              userId: guard.userId,
+              guardId,
+              notificationId: notifId,
+              type,
+              channel: 'PUSH',
+              title,
+              message,
+              status: 'SENT',
+              metadata: { amount: payout.amount, payoutId: pid, status: payout.status, backfilled: true },
+            },
+          })
+          created++
+        } catch {
+          // Skip on unique constraint race
+        }
+      }
+    }
+
+    console.log(`🔄 Backfilled ${created} notifications (tips + payouts) for guard ${guardId}`)
+    return res.json({ success: true, created })
+  } catch (err) {
+    console.error('❌ Backfill error:', err)
+    return res.status(500).json({ success: false, error: 'Backfill failed' })
+  }
+})
+
+/**
+ * POST /api/mobile/me/notifications/test
+ * Create a test notification for the logged-in guard (dev only)
+ */
+router.post('/mobile/me/notifications/test', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+    const { notifyGuard } = await import('../lib/notifications')
+    await notifyGuard(guardId, 'TIP_RECEIVED', 'Test notification', 'This is a test — notifications are working!', { test: true })
+    return res.json({ success: true, message: 'Test notification created' })
+  } catch (error) {
+    console.error('❌ Test notification error:', error)
+    return res.status(500).json({ success: false, error: String(error) })
+  }
+})
+
+/**
  * GET /api/mobile/me/notifications
  * Get the logged-in guard's notifications (newest first)
  */
@@ -1148,18 +1280,24 @@ router.get('/mobile/me/notifications', mobileAuth, async (req: Request, res: Res
     const guardId = req.guard!.guardId
     const { limit = '30' } = req.query
 
+    // Fetch the guard's userId for fallback (notifications created before guardId was stored)
     const guard = await prisma.carGuard.findUnique({
       where: { id: guardId },
       select: { userId: true },
     })
 
-    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
-
     const notifications = await prisma.notification.findMany({
-      where: { userId: guard.userId },
+      where: {
+        OR: [
+          { guardId },
+          ...(guard ? [{ userId: guard.userId, guardId: null }] : []),
+        ],
+      },
       orderBy: { createdAt: 'desc' },
       take: parseInt(limit as string),
     })
+
+    console.log(`📬 Notifications for guard ${guardId}: ${notifications.length} found`)
 
     const unreadCount = notifications.filter(n => !n.readAt).length
 
@@ -1192,15 +1330,8 @@ router.post('/mobile/me/notifications/read-all', mobileAuth, async (req: Request
   try {
     const guardId = req.guard!.guardId
 
-    const guard = await prisma.carGuard.findUnique({
-      where: { id: guardId },
-      select: { userId: true },
-    })
-
-    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
-
     await prisma.notification.updateMany({
-      where: { userId: guard.userId, readAt: null },
+      where: { guardId, readAt: null },
       data: { readAt: new Date() },
     })
 

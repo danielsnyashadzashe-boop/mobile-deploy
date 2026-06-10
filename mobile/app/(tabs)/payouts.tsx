@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { formatCurrency } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
-import { requestPayout, getPayoutRequests, getAutoPayoutSettings, PayoutRequest, AutoPayoutSettings } from '../../services/mobileApiService';
+import { submitPayoutRequest, getMyPayouts, getAutoPayoutSettings, PayoutRequest, AutoPayoutSettings } from '../../services/mobileApiService';
 import { useAuth } from '../../contexts/AuthContext';
 import { AlertModal } from '../../components/AlertModal';
 
@@ -60,18 +60,18 @@ export default function PayoutsScreen() {
 
   // ─── Load requests ────────────────────────────────────────────────────────
   const loadRequests = useCallback(async () => {
-    if (!authGuard?.guardPublicId) return;
+    if (!token) return;
     try {
       const [payoutsRes, autoRes] = await Promise.all([
-        getPayoutRequests(authGuard.guardPublicId),
-        token ? getAutoPayoutSettings(token) : Promise.resolve({ success: false }),
+        getMyPayouts(token),
+        getAutoPayoutSettings(token),
       ]);
       if (payoutsRes.success && payoutsRes.data) setRequests(payoutsRes.data);
       if (autoRes.success && autoRes.data) setAutoPayoutSettings(autoRes.data);
     } catch (e) {
       console.error('loadRequests error:', e);
     }
-  }, [authGuard?.guardPublicId, token]);
+  }, [token]);
 
   useEffect(() => {
     if (!guardLoading && guardData) {
@@ -117,7 +117,7 @@ export default function PayoutsScreen() {
 
   // ─── Submit ───────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!authGuard?.guardPublicId || !canSubmit) return;
+    if (!token || !canSubmit) return;
 
     if (hasPending) {
       showModal('warning', 'Request Already Pending',
@@ -133,7 +133,7 @@ export default function PayoutsScreen() {
 
     setIsSubmitting(true);
     try {
-      const res = await requestPayout(authGuard.guardPublicId, parsedAmount, notes.trim() || undefined);
+      const res = await submitPayoutRequest(parsedAmount, token, notes.trim() || undefined);
 
       if (res.success) {
         showModal('success', 'Request Submitted',

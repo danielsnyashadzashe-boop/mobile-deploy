@@ -8,52 +8,75 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useNotifications, AppNotification } from '../contexts/NotificationContext';
 
-const TYPE_CONFIG: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string }> = {
-  PAYOUT_APPROVED: { icon: 'checkmark-circle', color: '#10B981', bg: '#ECFDF5' },
-  PAYOUT_REJECTED: { icon: 'close-circle', color: '#EF4444', bg: '#FEF2F2' },
-  PAYOUT_SENT:     { icon: 'send', color: '#5B94D3', bg: '#EFF6FF' },
-  TIP_RECEIVED:    { icon: 'cash', color: '#F59E0B', bg: '#FFFBEB' },
-  ADMIN_MESSAGE:   { icon: 'megaphone', color: '#8B5CF6', bg: '#F5F3FF' },
-  DEFAULT:         { icon: 'notifications', color: '#6B7280', bg: '#F3F4F6' },
+// ─── type config ────────────────────────────────────────────────────────────
+
+const TYPE_CONFIG: Record<string, {
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  bg: string;
+  label: string;
+}> = {
+  PAYOUT_APPROVED: { icon: 'checkmark-circle', color: '#10B981', bg: '#ECFDF5', label: 'Payout Approved' },
+  PAYOUT_REJECTED: { icon: 'close-circle',     color: '#EF4444', bg: '#FEF2F2', label: 'Payout Rejected' },
+  PAYOUT_SENT:     { icon: 'paper-plane',       color: '#5B94D3', bg: '#EFF6FF', label: 'Payout Sent'     },
+  TIP_RECEIVED:    { icon: 'cash',              color: '#F59E0B', bg: '#FFFBEB', label: 'Tip Received'    },
+  ADMIN_MESSAGE:   { icon: 'megaphone',         color: '#8B5CF6', bg: '#F5F3FF', label: 'Message'         },
+  DEFAULT:         { icon: 'notifications',     color: '#6B7280', bg: '#F3F4F6', label: 'Notification'    },
 };
 
-function getConfig(type: string) {
-  return TYPE_CONFIG[type] || TYPE_CONFIG.DEFAULT;
+function cfg(type: string) {
+  return TYPE_CONFIG[type] ?? TYPE_CONFIG.DEFAULT;
 }
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'Just now';
+  if (mins < 1)  return 'Just now';
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
+  if (hrs < 24)  return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  if (days === 1) return 'Yesterday';
+  if (days < 7)  return `${days} days ago`;
+  return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' });
 }
 
-function NotificationRow({ item }: { item: AppNotification }) {
-  const cfg = getConfig(item.type);
+// ─── notification row ────────────────────────────────────────────────────────
+
+function NotifRow({ item, last }: { item: AppNotification; last?: boolean }) {
+  const c = cfg(item.type);
   return (
-    <View style={[styles.row, !item.read && styles.rowUnread]}>
-      <View style={[styles.iconWrap, { backgroundColor: cfg.bg }]}>
-        <Ionicons name={cfg.icon} size={22} color={cfg.color} />
+    <View style={[s.row, !last && s.rowBorder, !item.read && s.rowUnread]}>
+      {/* unread accent bar */}
+      {!item.read && <View style={s.accentBar} />}
+
+      {/* icon */}
+      <View style={[s.iconWrap, { backgroundColor: c.bg }]}>
+        <Ionicons name={c.icon} size={22} color={c.color} />
       </View>
-      <View style={styles.rowContent}>
-        <View style={styles.rowHeader}>
-          <Text style={styles.rowTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.rowTime}>{timeAgo(item.createdAt)}</Text>
+
+      {/* body */}
+      <View style={s.rowBody}>
+        <View style={s.rowTop}>
+          <Text style={s.rowTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={s.rowTime}>{timeAgo(item.createdAt)}</Text>
         </View>
-        <Text style={styles.rowMessage}>{item.message}</Text>
+        <Text style={s.rowType}>{c.label}</Text>
+        <Text style={s.rowMessage} numberOfLines={2}>{item.message}</Text>
       </View>
-      {!item.read && <View style={styles.unreadDot} />}
+
+      {/* unread dot */}
+      {!item.read && <View style={s.unreadDot} />}
     </View>
   );
 }
+
+// ─── screen ──────────────────────────────────────────────────────────────────
 
 export default function NotificationsScreen() {
   const router = useRouter();
@@ -61,109 +84,220 @@ export default function NotificationsScreen() {
 
   useEffect(() => {
     fetchNotifications();
-    if (unreadCount > 0) {
-      markAllRead();
-    }
+    if (unreadCount > 0) markAllRead();
   }, []);
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
-      {unreadCount > 0 && (
-        <View style={styles.topBar}>
-          <Text style={styles.topBarText}>{unreadCount} unread</Text>
-          <TouchableOpacity onPress={markAllRead} activeOpacity={0.7}>
-            <Text style={styles.markReadBtn}>Mark all read</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#0D2F6E' }} edges={['top', 'left', 'right']}>
 
-      {isLoading && notifications.length === 0 ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#5B94D3" />
+      {/* ── GRADIENT HEADER ─────────────────────────────────── */}
+      <LinearGradient colors={['#0D2F6E', '#1A56A5', '#5B94D3']} style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={20} color="#fff" />
+        </TouchableOpacity>
+
+        <View style={s.headerCenter}>
+          <Text style={s.headerTitle}>Notifications</Text>
+          {unreadCount > 0 && (
+            <View style={s.headerBadge}>
+              <Text style={s.headerBadgeText}>{unreadCount}</Text>
+            </View>
+          )}
         </View>
-      ) : notifications.length === 0 ? (
-        <View style={styles.center}>
-          <Ionicons name="notifications-off-outline" size={56} color="#D1D5DB" />
-          <Text style={styles.emptyTitle}>No notifications yet</Text>
-          <Text style={styles.emptySubtitle}>
-            You'll be notified here when your payout is approved or sent.
-          </Text>
-        </View>
-      ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
-          {notifications.map(n => (
-            <NotificationRow key={n.id} item={n} />
-          ))}
-        </ScrollView>
-      )}
+
+        <TouchableOpacity
+          onPress={markAllRead}
+          style={[s.readAllBtn, unreadCount === 0 && { opacity: 0.4 }]}
+          disabled={unreadCount === 0}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="checkmark-done" size={14} color="#fff" />
+          <Text style={s.readAllText}>Read all</Text>
+        </TouchableOpacity>
+      </LinearGradient>
+
+      {/* ── CONTENT ─────────────────────────────────────────── */}
+      <View style={s.body}>
+        {isLoading && notifications.length === 0 ? (
+          <View style={s.center}>
+            <ActivityIndicator size="large" color="#5B94D3" />
+            <Text style={s.loadingText}>Loading notifications…</Text>
+          </View>
+
+        ) : notifications.length === 0 ? (
+          <View style={s.center}>
+            <View style={s.emptyIconWrap}>
+              <Ionicons name="notifications-off-outline" size={40} color="#9CA3AF" />
+            </View>
+            <Text style={s.emptyTitle}>All caught up</Text>
+            <Text style={s.emptySub}>
+              You'll be notified here when your payout is approved, sent, or when you receive a tip.
+            </Text>
+          </View>
+
+        ) : (
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+            {/* summary strip */}
+            {unreadCount > 0 && (
+              <View style={s.summaryStrip}>
+                <View style={s.summaryDot} />
+                <Text style={s.summaryText}>{unreadCount} unread notification{unreadCount !== 1 ? 's' : ''}</Text>
+              </View>
+            )}
+
+            {/* group into a card */}
+            <View style={s.listCard}>
+              {notifications.map((n, i) => (
+                <NotifRow key={n.id} item={n} last={i === notifications.length - 1} />
+              ))}
+            </View>
+          </ScrollView>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
-  center:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+// ─── styles ──────────────────────────────────────────────────────────────────
 
-  topBar: {
+const s = StyleSheet.create({
+  // header
+  header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#EFF6FF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#BFDBFE',
+    paddingVertical: 14,
+    gap: 10,
   },
-  topBarText:   { fontSize: 13, color: '#3B82F6', fontFamily: 'Nunito-SemiBold' },
-  markReadBtn:  { fontSize: 13, color: '#5B94D3', fontFamily: 'Nunito-Bold' },
+  backBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  },
+  headerCenter: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  headerTitle: {
+    fontSize: 18, fontFamily: 'Nunito-Bold', color: '#fff',
+  },
+  headerBadge: {
+    backgroundColor: '#EF4444', borderRadius: 10,
+    minWidth: 20, height: 20,
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  headerBadgeText: {
+    fontSize: 11, fontFamily: 'Nunito-Bold', color: '#fff',
+  },
+  readAllBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
+    flexShrink: 0,
+  },
+  readAllText: {
+    fontSize: 12, fontFamily: 'Nunito-SemiBold', color: '#fff',
+  },
 
+  // body
+  body: { flex: 1, backgroundColor: '#F1F5F9' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  loadingText: {
+    marginTop: 12, fontSize: 13, fontFamily: 'Nunito-Regular', color: '#9CA3AF',
+  },
+
+  // empty state
+  emptyIconWrap: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18, fontFamily: 'Nunito-Bold', color: '#374151', marginBottom: 8,
+  },
+  emptySub: {
+    fontSize: 13, fontFamily: 'Nunito-Regular', color: '#6B7280',
+    textAlign: 'center', lineHeight: 20,
+  },
+
+  // summary strip
+  summaryStrip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginHorizontal: 16, marginTop: 16, marginBottom: 8,
+  },
+  summaryDot: {
+    width: 7, height: 7, borderRadius: 4, backgroundColor: '#5B94D3',
+  },
+  summaryText: {
+    fontSize: 11, fontFamily: 'Nunito-SemiBold',
+    color: '#5B94D3', letterSpacing: 0.3,
+  },
+
+  // notification list card
+  listCard: {
+    marginHorizontal: 16,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+
+  // row
   row: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 14,
-    padding: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    position: 'relative',
   },
-  rowUnread: { borderLeftWidth: 3, borderLeftColor: '#5B94D3' },
+  rowBorder: {
+    borderBottomWidth: 1, borderBottomColor: '#F8FAFC',
+  },
+  rowUnread: {
+    backgroundColor: '#FAFCFF',
+  },
+  accentBar: {
+    position: 'absolute',
+    left: 0, top: 0, bottom: 0,
+    width: 3,
+    backgroundColor: '#5B94D3',
+    borderTopLeftRadius: 2,
+    borderBottomLeftRadius: 2,
+  },
 
   iconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    flexShrink: 0,
+    width: 46, height: 46, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: 12, flexShrink: 0,
   },
 
-  rowContent: { flex: 1 },
-  rowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
+  rowBody: { flex: 1, minWidth: 0 },
+  rowTop: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1,
   },
-  rowTitle:   { flex: 1, fontSize: 14, fontFamily: 'Nunito-Bold', color: '#111827', marginRight: 8 },
-  rowTime:    { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#9CA3AF', flexShrink: 0 },
-  rowMessage: { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#4B5563', lineHeight: 18 },
+  rowTitle: {
+    flex: 1, fontSize: 14, fontFamily: 'Nunito-Bold', color: '#111827', marginRight: 8,
+  },
+  rowTime: {
+    fontSize: 11, fontFamily: 'Nunito-Regular', color: '#9CA3AF', flexShrink: 0,
+  },
+  rowType: {
+    fontSize: 10, fontFamily: 'Nunito-SemiBold',
+    color: '#9CA3AF', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 3,
+  },
+  rowMessage: {
+    fontSize: 13, fontFamily: 'Nunito-Regular', color: '#4B5563', lineHeight: 18,
+  },
 
   unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 8, height: 8, borderRadius: 4,
     backgroundColor: '#5B94D3',
-    marginLeft: 8,
-    marginTop: 6,
-    flexShrink: 0,
+    marginLeft: 8, flexShrink: 0,
   },
-
-  emptyTitle:    { fontSize: 17, fontFamily: 'Nunito-Bold', color: '#374151', marginTop: 16 },
-  emptySubtitle: { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#6B7280', textAlign: 'center', marginTop: 8, lineHeight: 20 },
 });

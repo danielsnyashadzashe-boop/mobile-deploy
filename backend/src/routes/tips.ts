@@ -122,14 +122,14 @@ router.post('/tips', async (req: Request, res: Response) => {
       })
     }
 
-    // Notify guard of tip received (non-blocking)
+    // Notify guard of tip received (non-blocking — notifyGuard handles errors internally)
     notifyGuard(
       guard.id,
       'TIP_RECEIVED',
       'You received a tip!',
       `R${guardReceivesAmount.toFixed(2)} has been added to your balance.`,
       { amount: guardReceivesAmount, newBalance: updatedGuard.balance }
-    ).catch(() => {})
+    )
 
     res.status(201).json({
       success: true,
@@ -402,7 +402,7 @@ async function processTipInternal(data: any) {
     'You received a tip!',
     `R${guardReceivesAmount.toFixed(2)} has been added to your balance.`,
     { amount: guardReceivesAmount, newBalance: updatedGuard.balance }
-  ).catch(() => {})
+  )
 
   return {
     tipId: tip.id,

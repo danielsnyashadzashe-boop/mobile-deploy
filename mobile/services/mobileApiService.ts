@@ -710,6 +710,83 @@ export interface AutoPayoutSettings {
   amountUntilAutoPayout: number;
 }
 
+/**
+ * Get the logged-in guard's payout requests (JWT auth)
+ */
+export async function getMyPayouts(token: string): Promise<ApiResponse<PayoutRequest[]>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/payouts`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to fetch payouts' };
+    }
+    return { success: true, data: result.data };
+  } catch (error) {
+    console.error('Error fetching payouts:', error);
+    return { success: false, error: 'Failed to fetch payouts' };
+  }
+}
+
+/**
+ * Submit a payout request (JWT auth)
+ */
+export async function submitPayoutRequest(
+  amount: number,
+  token: string,
+  notes?: string
+): Promise<ApiResponse<{ payoutId: string; amount: number; status: string; requestedAt: string; currentBalance: number; note: string }>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/payout/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ amount, notes: notes || '' }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to submit payout request' };
+    }
+    return result;
+  } catch (error) {
+    console.error('Error submitting payout request:', error);
+    return { success: false, error: 'Something went wrong. Please check your connection and try again.' };
+  }
+}
+
+/**
+ * Update the logged-in guard's profile (JWT auth)
+ */
+export async function updateMyProfile(
+  data: {
+    name?: string;
+    surname?: string;
+    phone?: string;
+    bankName?: string;
+    accountNumber?: string;
+    accountHolder?: string;
+    branchCode?: string;
+    accountType?: string;
+  },
+  token: string
+): Promise<ApiResponse<GuardData>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to update profile' };
+    }
+    return { success: true, data: result.data };
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    return { success: false, error: 'Failed to update profile. Please try again.' };
+  }
+}
+
 export async function getAutoPayoutSettings(token: string): Promise<ApiResponse<AutoPayoutSettings>> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/mobile/me/auto-payout-settings`, {
@@ -743,6 +820,8 @@ export default {
   requestBankTransfer,
   requestPayout,
   getPayoutRequests,
+  getMyPayouts,
+  submitPayoutRequest,
   getAutoPayoutSettings,
   NETWORK_CODES,
 };

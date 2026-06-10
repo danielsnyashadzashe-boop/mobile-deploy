@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:3003';
@@ -28,21 +28,51 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const backfilledRef = useRef(false);
 
   const fetchNotifications = useCallback(async () => {
     if (!token) return;
+    setIsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/mobile/me/notifications?limit=50`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
       const data = await res.json();
-      if (data.success) {
-        setNotifications(data.data.notifications);
-        setUnreadCount(data.data.unreadCount);
+      if (!data.success) return;
+
+      const notifs: AppNotification[] = data.data.notifications;
+
+      // Auto-backfill once per session on first load to catch up on missed notifications
+      if (!backfilledRef.current) {
+        backfilledRef.current = true;
+        try {
+          await fetch(`${API_URL}/api/mobile/me/notifications/backfill`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          // Re-fetch after backfill to pick up any newly created records
+          const res2 = await fetch(`${API_URL}/api/mobile/me/notifications?limit=50`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data2 = await res2.json();
+          if (data2.success) {
+            setNotifications(data2.data.notifications);
+            setUnreadCount(data2.data.unreadCount);
+          }
+        } catch {
+          setNotifications(notifs);
+          setUnreadCount(data.data.unreadCount);
+        }
+        return;
       }
+
+      setNotifications(notifs);
+      setUnreadCount(data.data.unreadCount);
     } catch {
       // Non-fatal
+    } finally {
+      setIsLoading(false);
     }
   }, [token]);
 
@@ -63,12 +93,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isAuthenticated) {
       fetchNotifications();
-      // Poll every 60 seconds for new notifications
       const interval = setInterval(fetchNotifications, 60_000);
       return () => clearInterval(interval);
     } else {
       setNotifications([]);
       setUnreadCount(0);
+      backfilledRef.current = false;
     }
   }, [isAuthenticated, fetchNotifications]);
 
