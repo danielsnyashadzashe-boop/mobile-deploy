@@ -32,7 +32,7 @@ router.post('/notifications/send', async (req: Request, res: Response) => {
 
     if (isBroadcast) {
       const guards = await prisma.carGuard.findMany({
-        where: { status: 'ACTIVE', pushToken: { not: null } },
+        where: { status: 'ACTIVE' },
         select: { id: true },
       })
 

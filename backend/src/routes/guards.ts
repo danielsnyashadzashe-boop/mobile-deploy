@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
+import { notifyGuard } from '../lib/notifications'
 
 const router = Router()
 
@@ -270,6 +271,25 @@ router.patch('/:guardId/balance', async (req: Request, res: Response) => {
     })
 
     console.log('✅ Balance updated:', guardId, updatedGuard.balance)
+
+    // Notify guard when admin credits or adjusts their balance
+    if (operation === 'add') {
+      notifyGuard(
+        guard.id,
+        'TIP_RECEIVED',
+        'Balance credited',
+        `R${amount.toFixed(2)} has been added to your balance by the administrator.`,
+        { amount, newBalance: updatedGuard.balance, operation }
+      )
+    } else if (operation === 'set' && updatedGuard.balance > (guard.balance || 0)) {
+      notifyGuard(
+        guard.id,
+        'TIP_RECEIVED',
+        'Balance updated',
+        `Your balance has been set to R${updatedGuard.balance.toFixed(2)} by the administrator.`,
+        { newBalance: updatedGuard.balance, previousBalance: guard.balance, operation }
+      )
+    }
 
     return res.json({
       success: true,
