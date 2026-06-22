@@ -64,6 +64,9 @@ export interface Transaction {
   date: string;
   time: string;
   createdAt: string;
+  failureReason?: string;
+  paymentMethod?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface Payout {
@@ -735,13 +738,14 @@ export async function getMyPayouts(token: string): Promise<ApiResponse<PayoutReq
 export async function submitPayoutRequest(
   amount: number,
   token: string,
-  notes?: string
-): Promise<ApiResponse<{ payoutId: string; amount: number; status: string; requestedAt: string; currentBalance: number; note: string }>> {
+  notes?: string,
+  method?: 'VOUCHER' | 'BANK_TRANSFER'
+): Promise<ApiResponse<{ payoutId: string; amount: number; status: string; method: string; requestedAt: string; currentBalance: number; note: string }>> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/mobile/me/payout/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ amount, notes: notes || '' }),
+      body: JSON.stringify({ amount, notes: notes || '', method: method || 'VOUCHER' }),
     });
     const result = await response.json();
     if (!response.ok || !result.success) {
