@@ -959,21 +959,39 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
       skip: parseInt(offset as string),
     })
 
+    const total = await prisma.transaction.count({ where })
+
     return res.json({
       success: true,
       data: {
-        transactions: transactions.map(t => ({
-          id: t.id,
-          type: t.type,
-          amount: t.amount,
-          description: t.description,
-          status: t.status || 'COMPLETED',
-          reference: t.reference,
-          balance: t.balance,
-          date: t.createdAt.toISOString().split('T')[0],
-          time: t.createdAt.toISOString().split('T')[1].split('.')[0],
-          createdAt: t.createdAt.toISOString(),
-        }))
+        transactions: transactions.map(t => {
+          const meta = (t.metadata as Record<string, unknown>) ?? {}
+          const status = t.status || 'COMPLETED'
+          const row: Record<string, unknown> = {
+            id: t.id,
+            type: t.type,
+            amount: t.amount,
+            description: t.description,
+            status,
+            reference: t.reference,
+            balance: t.balance,
+            date: t.createdAt.toISOString().split('T')[0],
+            time: t.createdAt.toISOString().split('T')[1].split('.')[0],
+            createdAt: t.createdAt.toISOString(),
+            metadata: meta,
+          }
+          if (status === 'FAILED' || status === 'REVERSED') {
+            row.failureReason = (meta.failureReason as string) || 'Payment didn\'t go through'
+            row.paymentMethod = (meta.paymentMethod as string) || null
+          }
+          return row
+        }),
+        pagination: {
+          total,
+          limit: parseInt(limit as string),
+          offset: parseInt(offset as string),
+          hasMore: parseInt(offset as string) + transactions.length < total,
+        },
       }
     })
   } catch (error) {
@@ -1029,24 +1047,30 @@ router.get('/mobile/me/payouts', mobileAuth, async (req: Request, res: Response)
  */
 router.post('/mobile/me/payout/request', mobileAuth, async (req: Request, res: Response) => {
   try {
-    const { amount, notes } = req.body
+    const { amount, notes, method } = req.body
     const guardId = req.guard!.guardId
 
     if (!amount) return res.status(400).json({ success: false, error: 'Amount is required' })
     if (amount < 10) return res.status(400).json({ success: false, error: 'Minimum payout amount is R10' })
     if (amount % 10 !== 0) return res.status(400).json({ success: false, error: 'Payout amount must be a multiple of R10' })
 
+    const resolvedMethod = method === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'VOUCHER'
+
     const guard = await prisma.carGuard.findUnique({ where: { id: guardId } })
     if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
     if (guard.status !== 'ACTIVE') return res.status(400).json({ success: false, error: 'Guard account is not active' })
     if (guard.balance < amount) return res.status(400).json({ success: false, error: 'Insufficient balance', currentBalance: guard.balance })
+
+    if (resolvedMethod === 'BANK_TRANSFER' && !guard.accountNumber) {
+      return res.status(400).json({ success: false, error: 'No banking details on file. Please add your bank account in your profile before requesting a bank transfer.' })
+    }
 
     const existing = await prisma.payout.findFirst({ where: { guardId, status: 'PENDING' } })
     if (existing) return res.status(400).json({ success: false, error: 'You already have a pending payout request. Please wait for it to be processed.' })
 
     const payoutId = `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
     const payout = await prisma.payout.create({
-      data: { payoutId, guardId, amount, status: 'PENDING', notes: notes || null }
+      data: { payoutId, guardId, amount, status: 'PENDING', method: resolvedMethod as any, notes: notes || null }
     })
 
     return res.status(201).json({
@@ -1056,6 +1080,7 @@ router.post('/mobile/me/payout/request', mobileAuth, async (req: Request, res: R
         payoutId: payout.payoutId,
         amount: payout.amount,
         status: payout.status,
+        method: payout.method,
         requestedAt: payout.createdAt.toISOString(),
         currentBalance: guard.balance,
         note: 'Your request is pending admin approval. Balance will be deducted upon approval.'

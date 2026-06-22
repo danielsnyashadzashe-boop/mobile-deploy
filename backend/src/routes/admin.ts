@@ -239,7 +239,7 @@ router.post('/payout-requests/:id/reject', async (req: Request, res: Response) =
 
 /**
  * POST /api/admin/payout-requests/:id/ewallet-sent
- * Mark payout as completed/sent — notify guard to check their messages
+ * Mark payout as completed — eWallet method (legacy + default)
  */
 router.post('/payout-requests/:id/ewallet-sent', async (req: Request, res: Response) => {
   try {
@@ -271,13 +271,58 @@ router.post('/payout-requests/:id/ewallet-sent', async (req: Request, res: Respo
       'PAYOUT_SENT',
       'Payment Sent',
       `Your payout of R${payout.amount.toFixed(2)} has been sent. Check your messages.`,
-      { payoutId: payout.payoutId || id, amount: payout.amount }
+      { payoutId: payout.payoutId || id, amount: payout.amount, method: 'VOUCHER' }
     )
 
-    console.log('✅ Payout marked as sent:', id, 'Guard:', payout.guard.guardId)
+    console.log('✅ Payout (eWallet) marked as sent:', id, 'Guard:', payout.guard.guardId)
     return res.json({ success: true, message: 'Payout marked as sent' })
   } catch (error) {
     console.error('❌ Error marking payout as sent:', error)
+    return res.status(500).json({ success: false, error: 'Failed to update payout' })
+  }
+})
+
+/**
+ * POST /api/admin/payout-requests/:id/bank-transfer-sent
+ * Mark payout as completed — bank transfer method
+ */
+router.post('/payout-requests/:id/bank-transfer-sent', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { adminId, reference } = req.body
+
+    const payout = await prisma.payout.findUnique({
+      where: { id },
+      include: { guard: { select: { id: true, guardId: true } } },
+    })
+
+    if (!payout) return res.status(404).json({ success: false, error: 'Payout request not found' })
+    if (!['APPROVED', 'PROCESSING'].includes(payout.status)) {
+      return res.status(400).json({ success: false, error: `Cannot mark as sent a payout with status: ${payout.status}` })
+    }
+
+    await prisma.payout.update({
+      where: { id },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        adminNotes: reference || null,
+        approvedBy: adminId || payout.approvedBy,
+      },
+    })
+
+    await notifyGuard(
+      payout.guard.id,
+      'PAYOUT_SENT',
+      'Bank Transfer Processed',
+      `Your payout of R${payout.amount.toFixed(2)} has been processed. Funds will reflect in your bank account within 1–2 business days.`,
+      { payoutId: payout.payoutId || id, amount: payout.amount, method: 'BANK_TRANSFER', reference: reference || null }
+    )
+
+    console.log('✅ Payout (bank transfer) marked as sent:', id, 'Guard:', payout.guard.guardId)
+    return res.json({ success: true, message: 'Bank transfer confirmed' })
+  } catch (error) {
+    console.error('❌ Error confirming bank transfer:', error)
     return res.status(500).json({ success: false, error: 'Failed to update payout' })
   }
 })
