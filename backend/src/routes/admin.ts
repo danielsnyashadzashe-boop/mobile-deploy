@@ -508,4 +508,111 @@ router.post('/registration/:id/reject', async (req: Request, res: Response) => {
   }
 })
 
+/**
+ * POST /api/admin/tips/manual
+ * Manually record a tip that Netcash processed but the webhook missed.
+ * Body: { guardId, amount, reference?, netcashRef?, adminNote? }
+ */
+router.post('/tips/manual', async (req: Request, res: Response) => {
+  try {
+    const { guardId, amount, reference, netcashRef, adminNote } = req.body
+
+    if (!guardId || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      return res.status(400).json({ success: false, error: 'guardId and a positive amount are required' })
+    }
+
+    const guard = await prisma.carGuard.findUnique({ where: { guardId } })
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    const ref = netcashRef || reference || null
+
+    // Idempotency — don't double-process the same Netcash reference
+    if (ref) {
+      const existing = await prisma.transaction.findFirst({ where: { reference: ref } })
+      if (existing) {
+        return res.status(409).json({ success: false, error: `Already processed: ${ref}` })
+      }
+    }
+
+    const parsedAmount = parseFloat(amount)
+
+    const commissionSetting = await prisma.commissionSetting.findFirst({
+      where: { isActive: true, OR: [{ appliesTo: 'TIPS' }, { appliesTo: 'ALL' }] },
+    })
+    const commissionRate   = commissionSetting?.percentage ?? 0
+    const commissionAmount = parsedAmount * (commissionRate / 100)
+    const guardReceives    = parsedAmount - commissionAmount
+
+    await prisma.$transaction(async tx => {
+      const updatedGuard = await tx.carGuard.update({
+        where: { id: guard.id },
+        data: {
+          balance:          { increment: guardReceives },
+          lifetimeEarnings: { increment: guardReceives },
+        },
+      })
+
+      const tip = await tx.tip.create({
+        data: {
+          guardId:    guard.id,
+          customerId: 'manual-backfill',
+          locationId: guard.locationId,
+          amount:     guardReceives,
+        },
+      })
+
+      await tx.transaction.create({
+        data: {
+          guardId:     guard.id,
+          type:        'TIP',
+          amount:      guardReceives,
+          status:      'COMPLETED',
+          description: adminNote ? `Manual tip: ${adminNote}` : 'Tip (manual entry — Netcash webhook missed)',
+          reference:   ref,
+          balance:     updatedGuard.balance,
+          metadata:    { source: 'manual_backfill', netcashRef: ref } as any,
+        },
+      })
+
+      if (commissionAmount > 0) {
+        const txRecord = await tx.transaction.findFirst({
+          where: { guardId: guard.id, reference: ref || undefined },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (txRecord) {
+          await tx.commission.create({
+            data: {
+              guardId:        guard.id,
+              transactionId:  txRecord.id,
+              amount:         commissionAmount,
+              rate:           commissionRate,
+              originalAmount: parsedAmount,
+              guardReceives,
+              type:           'TIP',
+            },
+          })
+        }
+      }
+
+      await notifyGuard(
+        guard.id,
+        'TIP_RECEIVED',
+        'Tip credited',
+        `R${guardReceives.toFixed(2)} has been added to your balance.`,
+        { amount: guardReceives, newBalance: updatedGuard.balance, source: 'backfill' }
+      )
+    })
+
+    console.log(`✅ Manual tip recorded: guard=${guardId} amount=${guardReceives} ref=${ref}`)
+    return res.json({
+      success:  true,
+      message:  `R${guardReceives.toFixed(2)} credited to ${guard.name} ${guard.surname}`,
+      data:     { guardId, original: parsedAmount, commissionAmount, guardReceives, reference: ref },
+    })
+  } catch (error) {
+    console.error('❌ Error recording manual tip:', error)
+    return res.status(500).json({ success: false, error: 'Failed to record tip' })
+  }
+})
+
 export default router

@@ -274,54 +274,73 @@ router.get('/tips/guard/:guardId', async (req: Request, res: Response) => {
   }
 })
 
-// ==================== NETCASH WEBHOOK (Example) ====================
+// ==================== NETCASH WEBHOOK ====================
+// Netcash PayNow calls this URL (m6) server-to-server after a successful payment.
+// Field mapping (Netcash PayNow POST body):
+//   m1  = service key
+//   p2  = merchant reference  (we set: TIP_<guardId>_<timestamp>_QR)
+//   p3  = description
+//   p4  = amount (string, e.g. "20.00")
+//   p5  = Netcash transaction ID
+// This endpoint is ONLY called on success — there is no status field to check.
 router.post('/webhooks/netcash', async (req: Request, res: Response) => {
   try {
-    console.log('📥 Netcash webhook received:', req.body)
+    console.log('📥 Netcash webhook received:', JSON.stringify(req.body))
 
-    // Verify Netcash service key (read from shared DB Settings collection)
+    // Verify service key — Netcash sends it as m1
     const expectedKey = await getNetcashServiceKey()
-    const receivedKey = req.body.ServiceKey || req.headers['x-netcash-service-key']
-    if (!expectedKey || !receivedKey || receivedKey !== expectedKey) {
-      console.warn('⚠️ Netcash webhook rejected: invalid service key')
+    const receivedKey = (req.body.m1 || req.headers['x-netcash-service-key']) as string | undefined
+    if (expectedKey && (!receivedKey || receivedKey !== expectedKey)) {
+      console.warn('⚠️ Netcash webhook rejected: service key mismatch', { received: receivedKey })
       return res.status(401).json({ success: false, error: 'Unauthorized' })
     }
 
-    // Example Netcash webhook payload structure
-    // Adjust based on actual Netcash webhook format
-    const {
-      amount,
-      reference, // Should contain guardId
-      status,
-      transactionId,
-      customerEmail
-    } = req.body
+    // Extract fields using correct Netcash PayNow field names
+    const reference   = (req.body.p2 || '') as string   // e.g. TIP_GRD001_1718000000000_QR
+    const amountRaw   = (req.body.p4 || '0') as string  // e.g. "20.00"
+    const netcashTxId = (req.body.p5 || '') as string
 
-    if (status !== 'COMPLETED') {
-      return res.json({ success: true, message: 'Payment not completed yet' })
+    const amount = parseFloat(amountRaw)
+    if (!reference || isNaN(amount) || amount <= 0) {
+      console.warn('⚠️ Netcash webhook: missing or invalid p2/p4', req.body)
+      return res.status(400).json({ success: false, error: 'Missing reference or amount' })
     }
 
-    // Extract guardId from reference
-    const guardId = reference // Adjust parsing as needed
+    // Parse guard public ID from reference — format: TIP_<guardId>_<timestamp>_QR
+    const parts   = reference.split('_')
+    const guardId = parts.length >= 2 ? parts[1] : reference
+
+    console.log('💳 Netcash payment:', { reference, guardId, amount, netcashTxId })
+
+    // Idempotency — skip if we already processed this Netcash transaction
+    if (netcashTxId) {
+      const existing = await prisma.transaction.findFirst({
+        where: { reference: netcashTxId }
+      })
+      if (existing) {
+        console.log('ℹ️ Netcash webhook: already processed', netcashTxId)
+        return res.json({ success: true, message: 'Already processed' })
+      }
+    }
 
     // Process the tip
     const tipResult = await processTipInternal({
       guardId,
-      amount: parseFloat(amount),
+      amount,
       paymentMethod: 'card',
-      reference: transactionId,
-      customerEmail
+      reference: netcashTxId || reference,
     })
 
-    res.json({
+    console.log('✅ Netcash tip processed:', tipResult)
+    return res.json({
       success: true,
-      message: 'Webhook processed successfully',
+      message: 'Payment processed',
       data: tipResult
     })
 
   } catch (error) {
-    console.error('Error processing Netcash webhook:', error)
-    res.status(500).json({
+    console.error('❌ Error processing Netcash webhook:', error)
+    return res.status(500).json({
       success: false,
       error: 'Failed to process webhook'
     })
