@@ -4,7 +4,7 @@
     "slug": "tippa-carguard",
     "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/touch.png",
     "scheme": "tippa",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -21,7 +21,7 @@
       "package": "com.nogada.tippa.carguard",
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon.png",
+        "foregroundImage": "./assets/images/touch.png",
         "backgroundColor": "#10B981"
       }
     },
@@ -35,7 +35,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
+          "icon": "./assets/images/touch.png",
           "color": "#5B94D3"
         }
       ]
