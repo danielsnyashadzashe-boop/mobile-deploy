@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { mockPendingRegistrations, mockLocations, formatDate, formatTime } from '@/data/mockData';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,8 +7,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
-import { CheckCircle, XCircle, Clock, Eye, UserCheck, UserX } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Eye, UserCheck, UserX, Download, MapPin, Search, Filter } from 'lucide-react';
 
 const AdminRegistrations = () => {
   const [registrations, setRegistrations] = useState(mockPendingRegistrations);
@@ -19,6 +23,17 @@ const AdminRegistrations = () => {
   const [guardId, setGuardId] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+
+  // Bulk download dialog state
+  const [showBulkDownload, setShowBulkDownload] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkSearch, setBulkSearch] = useState('');
+  const [bulkLocation, setBulkLocation] = useState('all');
+  const [bulkStatus, setBulkStatus] = useState('all');
+  const [criteriaLocation, setCriteriaLocation] = useState('all');
+  const [criteriaStatus, setCriteriaStatus] = useState('all');
+  const [criteriaDateFrom, setCriteriaDateFrom] = useState('');
+  const [criteriaDateTo, setCriteriaDateTo] = useState('');
 
   // Filter registrations by status
   const filteredRegistrations = registrations.filter(reg => {
@@ -100,6 +115,62 @@ const AdminRegistrations = () => {
     setRejectionReason('');
   };
 
+  // Applicants visible in the "Select specific" tab
+  const specificTabApplicants = useMemo(() => {
+    return registrations.filter(reg => {
+      const q = bulkSearch.toLowerCase();
+      const matchesSearch = !q ||
+        reg.fullName.toLowerCase().includes(q) ||
+        reg.phoneNumber.toLowerCase().includes(q) ||
+        reg.idNumber.toLowerCase().includes(q);
+      const matchesLocation = bulkLocation === 'all' || reg.preferredLocation === bulkLocation;
+      const matchesStatus = bulkStatus === 'all' || reg.status === bulkStatus;
+      return matchesSearch && matchesLocation && matchesStatus;
+    });
+  }, [registrations, bulkSearch, bulkLocation, bulkStatus]);
+
+  // Applicants matched by "Filter by criteria" tab
+  const criteriaApplicants = useMemo(() => {
+    return registrations.filter(reg => {
+      const matchesLocation = criteriaLocation === 'all' || reg.preferredLocation === criteriaLocation;
+      const matchesStatus = criteriaStatus === 'all' || reg.status === criteriaStatus;
+      const submittedDate = reg.submittedAt.substring(0, 10);
+      const matchesFrom = !criteriaDateFrom || submittedDate >= criteriaDateFrom;
+      const matchesTo = !criteriaDateTo || submittedDate <= criteriaDateTo;
+      return matchesLocation && matchesStatus && matchesFrom && matchesTo;
+    });
+  }, [registrations, criteriaLocation, criteriaStatus, criteriaDateFrom, criteriaDateTo]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelectedIds(new Set(specificTabApplicants.map(r => r.id)));
+  const clearAll = () => setSelectedIds(new Set());
+
+  const handleDownloadSpecific = () => {
+    if (selectedIds.size === 0) {
+      toast.error('Select at least one applicant');
+      return;
+    }
+    toast.success(`Downloading ${selectedIds.size} applicant card${selectedIds.size > 1 ? 's' : ''} as ZIP`);
+    setShowBulkDownload(false);
+    setSelectedIds(new Set());
+  };
+
+  const handleDownloadCriteria = () => {
+    if (criteriaApplicants.length === 0) {
+      toast.error('No applicants match the selected filters');
+      return;
+    }
+    toast.success(`Downloading ${criteriaApplicants.length} applicant card${criteriaApplicants.length > 1 ? 's' : ''} as ZIP`);
+    setShowBulkDownload(false);
+  };
+
   const getLocationName = (locationId: string) => {
     const location = mockLocations.find(loc => loc.id === locationId);
     return location ? location.name : 'Unknown Location';
@@ -120,9 +191,19 @@ const AdminRegistrations = () => {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Guard Registrations</h1>
-        <p className="text-gray-600 mt-1">Review and approve guard registration applications</p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Guard Registrations</h1>
+          <p className="text-gray-600 mt-1">Review and approve guard registration applications</p>
+        </div>
+        <Button
+          variant="outline"
+          className="flex items-center gap-2"
+          onClick={() => { setShowBulkDownload(true); setSelectedIds(new Set()); setBulkSearch(''); setBulkLocation('all'); setBulkStatus('all'); }}
+        >
+          <Download className="w-4 h-4" />
+          Bulk Download Applicant Cards
+        </Button>
       </div>
 
       {/* Stats Cards */}
@@ -262,6 +343,171 @@ const AdminRegistrations = () => {
           </Card>
         ))}
       </div>
+
+      {/* Bulk Download Applicant Cards Dialog */}
+      <Dialog open={showBulkDownload} onOpenChange={setShowBulkDownload}>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Bulk Download Applicant Cards</DialogTitle>
+            <DialogDescription>
+              Download ID/QR cards for multiple applicants at once as a ZIP file.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Tabs defaultValue="criteria" className="flex-1 flex flex-col overflow-hidden">
+            <TabsList className="w-full">
+              <TabsTrigger value="criteria" className="flex-1 flex items-center gap-1">
+                <Filter className="w-3 h-3" /> Filter by criteria
+              </TabsTrigger>
+              <TabsTrigger value="specific" className="flex-1 flex items-center gap-1">
+                <Search className="w-3 h-3" /> Select specific
+              </TabsTrigger>
+            </TabsList>
+
+            {/* ── Filter by criteria tab ── */}
+            <TabsContent value="criteria" className="flex-1 flex flex-col gap-4 mt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="mb-1 block">Status</Label>
+                  <Select value={criteriaStatus} onValueChange={setCriteriaStatus}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="approved">Approved</SelectItem>
+                      <SelectItem value="rejected">Rejected</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label className="mb-1 flex items-center gap-1 block"><MapPin className="w-3 h-3" /> Location</Label>
+                  <Select value={criteriaLocation} onValueChange={setCriteriaLocation}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All locations" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All locations</SelectItem>
+                      {mockLocations.map(loc => (
+                        <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label className="mb-1 block">Submitted from</Label>
+                  <Input type="date" value={criteriaDateFrom} onChange={e => setCriteriaDateFrom(e.target.value)} />
+                </div>
+
+                <div>
+                  <Label className="mb-1 block">Submitted to</Label>
+                  <Input type="date" value={criteriaDateTo} onChange={e => setCriteriaDateTo(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mt-auto pt-2 border-t">
+                <p className="text-sm text-gray-500">
+                  {criteriaApplicants.length} applicant{criteriaApplicants.length !== 1 ? 's' : ''} matched
+                </p>
+                <Button onClick={handleDownloadCriteria} className="flex items-center gap-2">
+                  <Download className="w-4 h-4" />
+                  Download ZIP
+                </Button>
+              </div>
+            </TabsContent>
+
+            {/* ── Select specific tab ── */}
+            <TabsContent value="specific" className="flex-1 flex flex-col gap-3 mt-4 overflow-hidden">
+              {/* Filters row */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-1">
+                  <Input
+                    placeholder="Search name / phone / ID..."
+                    value={bulkSearch}
+                    onChange={e => setBulkSearch(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Select value={bulkLocation} onValueChange={setBulkLocation}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All locations" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All locations</SelectItem>
+                      {mockLocations.map(loc => (
+                        <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Select value={bulkStatus} onValueChange={setBulkStatus}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="approved">Approved</SelectItem>
+                      <SelectItem value="rejected">Rejected</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Select all / clear */}
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" onClick={selectAll}>
+                  Select all ({specificTabApplicants.length})
+                </Button>
+                <Button variant="ghost" size="sm" onClick={clearAll}>Clear</Button>
+                {selectedIds.size > 0 && (
+                  <span className="text-sm text-gray-500 ml-auto">{selectedIds.size} selected</span>
+                )}
+              </div>
+
+              {/* Applicant list */}
+              <ScrollArea className="flex-1 border rounded-md">
+                <div className="divide-y">
+                  {specificTabApplicants.length === 0 ? (
+                    <p className="text-center text-gray-500 py-8 text-sm">No applicants match the filters</p>
+                  ) : specificTabApplicants.map(reg => (
+                    <label
+                      key={reg.id}
+                      className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer"
+                    >
+                      <Checkbox
+                        checked={selectedIds.has(reg.id)}
+                        onCheckedChange={() => toggleSelect(reg.id)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{reg.fullName}</p>
+                        <p className="text-xs text-gray-500">{reg.phoneNumber} · {reg.idNumber}</p>
+                        <p className="text-xs text-gray-400">{getLocationName(reg.preferredLocation)}</p>
+                      </div>
+                      {getStatusBadge(reg.status)}
+                    </label>
+                  ))}
+                </div>
+              </ScrollArea>
+
+              {/* Download footer */}
+              <div className="flex items-center justify-between pt-2 border-t">
+                <p className="text-sm text-gray-500">
+                  {selectedIds.size} of {specificTabApplicants.length} selected
+                </p>
+                <Button onClick={handleDownloadSpecific} className="flex items-center gap-2">
+                  <Download className="w-4 h-4" />
+                  Download ZIP
+                </Button>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
 
       {/* View Details Dialog */}
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
