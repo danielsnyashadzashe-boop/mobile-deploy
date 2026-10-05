@@ -1,6 +1,20 @@
 import express, { Request, Response, Router } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { getNetcashServiceKey } from '../lib/settings'
+import { timingSafeEqual } from 'crypto'
+
+/** True only for a 24-character hex string, which is what @db.ObjectId needs. */
+function isObjectId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-fA-F0-9]{24}$/.test(value)
+}
+
+/** Constant-time compare, so a wrong key cannot be found a byte at a time. */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  if (ab.length !== bb.length) return false
+  return timingSafeEqual(ab, bb)
+}
 import { notifyGuard } from '../lib/notifications'
 
 const router: Router = express.Router()
@@ -73,7 +87,9 @@ router.post('/tips', async (req: Request, res: Response) => {
     const tip = await prisma.tip.create({
       data: {
         guardId: guard.id,
-        customerId: customerId || 'anonymous',
+        // Only set when it is a real Customer id. The old fallback wrote the
+        // literal 'anonymous' into an ObjectId column and threw.
+        customerId: isObjectId(customerId) ? customerId : undefined,
         locationId: locationId || guard.locationId,
         amount: guardReceivesAmount // Store the net amount guard receives
       }
@@ -288,10 +304,19 @@ router.post('/webhooks/netcash', async (req: Request, res: Response) => {
     console.log('📥 Netcash webhook received:', JSON.stringify(req.body))
 
     // Verify service key — Netcash sends it as m1
+    // This endpoint credits real money, so it fails CLOSED. The guard used to
+    // read `if (expectedKey && ...)`, which skipped the check entirely whenever
+    // the netcash_service_key setting was missing or blank: anyone who could
+    // reach the URL could credit any guard any amount.
     const expectedKey = await getNetcashServiceKey()
+    if (!expectedKey) {
+      console.error('🚨 Netcash webhook refused: netcash_service_key is not configured')
+      return res.status(503).json({ success: false, error: 'Webhook not configured' })
+    }
+
     const receivedKey = (req.body.m1 || req.headers['x-netcash-service-key']) as string | undefined
-    if (expectedKey && (!receivedKey || receivedKey !== expectedKey)) {
-      console.warn('⚠️ Netcash webhook rejected: service key mismatch', { received: receivedKey })
+    if (!receivedKey || !timingSafeEqualStr(receivedKey, expectedKey)) {
+      console.warn('⚠️ Netcash webhook rejected: service key mismatch')
       return res.status(401).json({ success: false, error: 'Unauthorized' })
     }
 
@@ -312,15 +337,16 @@ router.post('/webhooks/netcash', async (req: Request, res: Response) => {
 
     console.log('💳 Netcash payment:', { reference, guardId, amount, netcashTxId })
 
-    // Idempotency — skip if we already processed this Netcash transaction
-    if (netcashTxId) {
-      const existing = await prisma.transaction.findFirst({
-        where: { reference: netcashTxId }
-      })
-      if (existing) {
-        console.log('ℹ️ Netcash webhook: already processed', netcashTxId)
-        return res.json({ success: true, message: 'Already processed' })
-      }
+    // Idempotency. This used to run only when p5 was present, so a Netcash
+    // retry that omitted it credited the guard a second time. Fall back to the
+    // merchant reference, which we generate ourselves and is always set.
+    const idempotencyKey = netcashTxId || reference
+    const existing = await prisma.transaction.findFirst({
+      where: { reference: idempotencyKey }
+    })
+    if (existing) {
+      console.log('ℹ️ Netcash webhook: already processed', idempotencyKey)
+      return res.json({ success: true, message: 'Already processed' })
     }
 
     // Process the tip
@@ -373,7 +399,9 @@ async function processTipInternal(data: any) {
   const tip = await prisma.tip.create({
     data: {
       guardId: guard.id,
-      customerId: customerEmail || 'anonymous',
+      // customerEmail is an email address, not a Customer id, so it never
+      // belonged here. A Netcash QR tip has no customer at all.
+      customerId: undefined,
       locationId: guard.locationId,
       amount: guardReceivesAmount
     }

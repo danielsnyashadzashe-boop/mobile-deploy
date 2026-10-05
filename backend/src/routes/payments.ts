@@ -6,6 +6,23 @@ const BASE_URL = process.env.BASE_URL || 'https://api.nogadacarguard.co.za'
 
 // ─── HTML page helpers ────────────────────────────────────────────────────────
 
+/**
+ * Escape text before it goes into one of the pages below.
+ *
+ * These pages are Netcash redirect targets and every value in them comes
+ * straight off the query string, so `?p3=<img src=x onerror=...>` was
+ * reflected into the document. On a payments host that is worth taking
+ * seriously, whatever Netcash is expected to send.
+ */
+function esc(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function successPage(guardName: string, amount: string) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -51,7 +68,7 @@ function successPage(guardName: string, amount: string) {
     <div class="icon">✅</div>
     <h1>Payment Successful!</h1>
     <div class="amount">${amount ? `R${parseFloat(amount).toFixed(2)}` : ''}</div>
-    <p>Your tip to <span class="guard">${guardName || 'your car guard'}</span> has been received. They will be notified shortly.</p>
+    <p>Your tip to <span class="guard">${esc(guardName) || 'your car guard'}</span> has been received. They will be notified shortly.</p>
     <p class="close-note">You can close this tab and return to the app.</p>
     <p class="tippa">Powered by Tippa</p>
   </div>
@@ -103,7 +120,7 @@ function declinePage(reason: string) {
     <div class="icon">❌</div>
     <h1>Payment Not Completed</h1>
     <p>Your payment was not processed. No money has been taken from your account.</p>
-    ${reason ? `<p class="reason">${reason}</p>` : ''}
+    ${reason ? `<p class="reason">${esc(reason)}</p>` : ''}
     <p>Please try again by scanning the QR code.</p>
     <p class="close-note">You can close this tab.</p>
     <p class="tippa">Powered by Tippa</p>

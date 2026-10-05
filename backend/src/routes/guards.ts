@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
 import { notifyGuard } from '../lib/notifications'
+import { adminAuth } from '../middleware/adminAuth'
 
 const router = Router()
 
@@ -237,12 +238,24 @@ router.put('/:guardId', async (req: Request, res: Response) => {
  * PATCH /api/guards/:guardId/balance
  * Update guard balance (for testing/admin)
  */
-router.patch('/:guardId/balance', async (req: Request, res: Response) => {
+router.patch('/:guardId/balance', adminAuth, async (req: Request, res: Response) => {
   try {
     const { guardId } = req.params
     const { amount, operation = 'set' } = req.body // operation: 'set', 'add', 'subtract'
 
-    console.log('💰 Updating guard balance:', guardId, amount, operation)
+    // Validate before any mutation. `amount` came straight off the body, so a
+    // string made the += concatenate and the .toFixed(2) below throw, AFTER
+    // the balance had already been written: the caller got a 500 on a change
+    // that had already committed.
+    const parsedAmount = typeof amount === 'number' ? amount : parseFloat(amount)
+    if (!Number.isFinite(parsedAmount)) {
+      return res.status(400).json({ success: false, error: 'amount must be a number' })
+    }
+    if (!['set', 'add', 'subtract'].includes(operation)) {
+      return res.status(400).json({ success: false, error: 'operation must be set, add or subtract' })
+    }
+
+    console.log('💰 Updating guard balance:', guardId, parsedAmount, operation)
 
     const guard = await prisma.carGuard.findUnique({
       where: { guardId }
@@ -258,11 +271,11 @@ router.patch('/:guardId/balance', async (req: Request, res: Response) => {
     let newBalance = guard.balance || 0
 
     if (operation === 'add') {
-      newBalance += amount
+      newBalance += parsedAmount
     } else if (operation === 'subtract') {
-      newBalance -= amount
+      newBalance -= parsedAmount
     } else {
-      newBalance = amount
+      newBalance = parsedAmount
     }
 
     const updatedGuard = await prisma.carGuard.update({
@@ -278,8 +291,8 @@ router.patch('/:guardId/balance', async (req: Request, res: Response) => {
         guard.id,
         'TIP_RECEIVED',
         'Balance credited',
-        `R${amount.toFixed(2)} has been added to your balance by the administrator.`,
-        { amount, newBalance: updatedGuard.balance, operation }
+        `R${parsedAmount.toFixed(2)} has been added to your balance by the administrator.`,
+        { amount: parsedAmount, newBalance: updatedGuard.balance, operation }
       )
     } else if (operation === 'set' && updatedGuard.balance > (guard.balance || 0)) {
       notifyGuard(

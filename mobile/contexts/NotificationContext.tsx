@@ -29,9 +29,18 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const backfilledRef = useRef(false);
+  /**
+   * Bumped whenever local state is changed outside a fetch, so an in-flight
+   * fetch cannot overwrite it with what the server said before the change.
+   * Marking everything read while the backfill's second GET was still in the
+   * air put the old unread count straight back.
+   */
+  const stateSeq = useRef(0);
 
   const fetchNotifications = useCallback(async () => {
     if (!token) return;
+    const seq = stateSeq.current;
+    const isStale = () => stateSeq.current !== seq;
     setIsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/mobile/me/notifications?limit=100`, {
@@ -57,16 +66,19 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           });
           const data2 = await res2.json();
           if (data2.success) {
+            if (isStale()) return;
             setNotifications(data2.data.notifications);
             setUnreadCount(data2.data.unreadCount);
           }
         } catch {
+          if (isStale()) return;
           setNotifications(notifs);
           setUnreadCount(data.data.unreadCount);
         }
         return;
       }
 
+      if (isStale()) return;
       setNotifications(notifs);
       setUnreadCount(data.data.unreadCount);
     } catch {
@@ -85,6 +97,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       });
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
       setUnreadCount(0);
+      stateSeq.current += 1;
     } catch {
       // Non-fatal
     }

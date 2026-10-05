@@ -157,7 +157,15 @@ const AdminRegistrations = () => {
       toast.error('Select at least one applicant');
       return;
     }
-    toast.success(`Downloading ${selectedIds.size} applicant card${selectedIds.size > 1 ? 's' : ''} as ZIP`);
+    // TODO: no ZIP is produced yet. This reported success and did nothing,
+    // so an admin could select fifty applicants, see a confirmation and get
+    // no file. It needs a backend endpoint that renders the cards and
+    // streams an archive; this page is still on mock data, so there is
+    // nothing to render from either. Until then, say so.
+    toast.info(
+      `Bulk download is not available yet (${selectedIds.size} selected). ` +
+        'Open an applicant to download their card individually.'
+    );
     setShowBulkDownload(false);
     setSelectedIds(new Set());
   };
@@ -167,7 +175,11 @@ const AdminRegistrations = () => {
       toast.error('No applicants match the selected filters');
       return;
     }
-    toast.success(`Downloading ${criteriaApplicants.length} applicant card${criteriaApplicants.length > 1 ? 's' : ''} as ZIP`);
+    // Same as above: not implemented, and it must not claim otherwise.
+    toast.info(
+      `Bulk download is not available yet (${criteriaApplicants.length} match). ` +
+        'Open an applicant to download their card individually.'
+    );
     setShowBulkDownload(false);
   };
 

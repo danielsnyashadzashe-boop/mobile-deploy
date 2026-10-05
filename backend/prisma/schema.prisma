@@ -551,13 +551,18 @@ model Admin {
 model Tip {
   id                String           @id @default(auto()) @map("_id") @db.ObjectId
   guardId           String           @db.ObjectId
-  customerId        String           @db.ObjectId
+  // Optional, because a QR tip has no customer: the payer never creates an
+  // account. The code worked around a required field by writing the strings
+  // 'anonymous' and 'manual-backfill' into it, which Prisma rejects as
+  // malformed ObjectIds, so every webhook tip threw before the guard was
+  // credited. Nothing reads the customer relation.
+  customerId        String?          @db.ObjectId
   locationId        String           @db.ObjectId
   amount            Float
   createdAt         DateTime         @default(now())
 
   guard             CarGuard         @relation(fields: [guardId], references: [id])
-  customer          Customer         @relation(fields: [customerId], references: [id])
+  customer          Customer?        @relation(fields: [customerId], references: [id])
   location          Location         @relation(fields: [locationId], references: [id])
 }
 

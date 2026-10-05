@@ -1358,8 +1358,23 @@ router.post('/mobile/me/notifications/read-all', mobileAuth, async (req: Request
   try {
     const guardId = req.guard!.guardId
 
+    // Must match the OR in GET /mobile/me/notifications. This matched only
+    // { guardId }, while the list also returns legacy rows keyed on userId
+    // with a null guardId, so those could never be cleared and the unread
+    // badge came back on every poll.
+    const guard = await prisma.carGuard.findUnique({
+      where: { id: guardId },
+      select: { userId: true },
+    })
+
     await prisma.notification.updateMany({
-      where: { guardId, readAt: null },
+      where: {
+        readAt: null,
+        OR: [
+          { guardId },
+          ...(guard ? [{ userId: guard.userId, guardId: null }] : []),
+        ],
+      },
       data: { readAt: new Date() },
     })
 

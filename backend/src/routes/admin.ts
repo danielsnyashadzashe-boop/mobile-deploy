@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
 import { notifyGuard } from '../lib/notifications'
+import { adminAuth } from '../middleware/adminAuth'
 
 const router = Router()
 
@@ -124,7 +125,7 @@ router.get('/payout-requests', async (req: Request, res: Response) => {
  * POST /api/admin/payout-requests/:id/approve
  * Approve a payout — deduct from guard balance, notify guard
  */
-router.post('/payout-requests/:id/approve', async (req: Request, res: Response) => {
+router.post('/payout-requests/:id/approve', adminAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { adminId, adminNotes } = req.body
@@ -241,7 +242,7 @@ router.post('/payout-requests/:id/reject', async (req: Request, res: Response) =
  * POST /api/admin/payout-requests/:id/ewallet-sent
  * Mark payout as completed — eWallet method (legacy + default)
  */
-router.post('/payout-requests/:id/ewallet-sent', async (req: Request, res: Response) => {
+router.post('/payout-requests/:id/ewallet-sent', adminAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { adminId, notes } = req.body
@@ -286,7 +287,7 @@ router.post('/payout-requests/:id/ewallet-sent', async (req: Request, res: Respo
  * POST /api/admin/payout-requests/:id/bank-transfer-sent
  * Mark payout as completed — bank transfer method
  */
-router.post('/payout-requests/:id/bank-transfer-sent', async (req: Request, res: Response) => {
+router.post('/payout-requests/:id/bank-transfer-sent', adminAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { adminId, reference } = req.body
@@ -306,7 +307,13 @@ router.post('/payout-requests/:id/bank-transfer-sent', async (req: Request, res:
       data: {
         status: 'COMPLETED',
         completedAt: new Date(),
-        adminNotes: reference || null,
+        // Keep the existing note when no EFT reference is supplied. This read
+        // `reference || null`, so completing a transfer without typing one
+        // erased whatever the approver had written. The ewallet handler next
+        // door already preserves it.
+        adminNotes: reference
+          ? (payout.adminNotes ? `${payout.adminNotes} | Ref: ${reference}` : `Ref: ${reference}`)
+          : payout.adminNotes,
         approvedBy: adminId || payout.approvedBy,
       },
     })
@@ -513,7 +520,7 @@ router.post('/registration/:id/reject', async (req: Request, res: Response) => {
  * Manually record a tip that Netcash processed but the webhook missed.
  * Body: { guardId, amount, reference?, netcashRef?, adminNote? }
  */
-router.post('/tips/manual', async (req: Request, res: Response) => {
+router.post('/tips/manual', adminAuth, async (req: Request, res: Response) => {
   try {
     const { guardId, amount, reference, netcashRef, adminNote } = req.body
 
@@ -543,7 +550,7 @@ router.post('/tips/manual', async (req: Request, res: Response) => {
     const commissionAmount = parsedAmount * (commissionRate / 100)
     const guardReceives    = parsedAmount - commissionAmount
 
-    await prisma.$transaction(async tx => {
+    const result = await prisma.$transaction(async tx => {
       const updatedGuard = await tx.carGuard.update({
         where: { id: guard.id },
         data: {
@@ -555,13 +562,16 @@ router.post('/tips/manual', async (req: Request, res: Response) => {
       const tip = await tx.tip.create({
         data: {
           guardId:    guard.id,
-          customerId: 'manual-backfill',
+          // No customer: this is an admin backfill, not a payment by a person
+          // with an account. It wrote the string 'manual-backfill' into an
+          // ObjectId column, which rolled the whole transaction back and made
+          // this endpoint fail every single time it was called.
           locationId: guard.locationId,
           amount:     guardReceives,
         },
       })
 
-      await tx.transaction.create({
+      const txRecord = await tx.transaction.create({
         data: {
           guardId:     guard.id,
           type:        'TIP',
@@ -575,33 +585,38 @@ router.post('/tips/manual', async (req: Request, res: Response) => {
       })
 
       if (commissionAmount > 0) {
-        const txRecord = await tx.transaction.findFirst({
-          where: { guardId: guard.id, reference: ref || undefined },
-          orderBy: { createdAt: 'desc' },
+        // Bind to the row just created. This re-queried for the newest
+        // transaction matching `reference`, and when `ref` was null the
+        // filter dropped out entirely, so the commission could attach to an
+        // unrelated earlier transaction for the same guard.
+        await tx.commission.create({
+          data: {
+            guardId:        guard.id,
+            transactionId:  txRecord.id,
+            amount:         commissionAmount,
+            rate:           commissionRate,
+            originalAmount: parsedAmount,
+            guardReceives,
+            type:           'TIP',
+          },
         })
-        if (txRecord) {
-          await tx.commission.create({
-            data: {
-              guardId:        guard.id,
-              transactionId:  txRecord.id,
-              amount:         commissionAmount,
-              rate:           commissionRate,
-              originalAmount: parsedAmount,
-              guardReceives,
-              type:           'TIP',
-            },
-          })
-        }
       }
 
-      await notifyGuard(
-        guard.id,
-        'TIP_RECEIVED',
-        'Tip credited',
-        `R${guardReceives.toFixed(2)} has been added to your balance.`,
-        { amount: guardReceives, newBalance: updatedGuard.balance, source: 'backfill' }
-      )
+      return updatedGuard
     })
+
+    // Outside the transaction on purpose. notifyGuard sends an Expo push over
+    // HTTP using the non-transactional client; inside, a slow push ate the 5s
+    // transaction timeout and rolled the credit back while the push and the
+    // notification row survived. The guard was told about money they had not
+    // been given.
+    await notifyGuard(
+      guard.id,
+      'TIP_RECEIVED',
+      'Tip credited',
+      `R${guardReceives.toFixed(2)} has been added to your balance.`,
+      { amount: guardReceives, newBalance: result.balance, source: 'backfill' }
+    ).catch(err => console.error('⚠️ Manual tip credited but push failed:', err))
 
     console.log(`✅ Manual tip recorded: guard=${guardId} amount=${guardReceives} ref=${ref}`)
     return res.json({
