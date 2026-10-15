@@ -368,6 +368,14 @@ export default function DashboardScreen() {
               <Text className="text-sm font-medium text-gray-900">Buy Electricity</Text>
               <Text className="text-xs text-gray-500">Prepaid tokens</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => router.push('/how-to-tip')} className="rounded-xl p-4 shadow-sm mb-4" style={{ width: '48%', backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }}>
+              <View className="w-10 h-10 rounded-full items-center justify-center mb-2" style={{ backgroundColor: '#DBEAFE' }}>
+                <Ionicons name="help-circle-outline" size={20} color="#3B82F6" />
+              </View>
+              <Text className="text-sm font-medium text-gray-900">How to Tip</Text>
+              <Text className="text-xs text-gray-500">Show customer</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
