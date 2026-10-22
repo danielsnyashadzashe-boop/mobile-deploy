@@ -38,6 +38,16 @@
           "icon": "./assets/images/icons8-phone-64.png",
           "color": "#5B94D3"
         }
+      ],
+      "expo-video",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
       ]
     ],
     "experiments": {

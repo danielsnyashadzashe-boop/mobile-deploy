@@ -23,7 +23,9 @@ function esc(value: unknown): string {
     .replace(/'/g, '&#39;')
 }
 
-function successPage(guardName: string, amount: string) {
+function successPage(guardName: string, amount: string, confirmed = true) {
+  const value = parseFloat(amount)
+  const amountText = Number.isFinite(value) && value > 0 ? `R${value.toFixed(2)}` : ''
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -66,9 +68,9 @@ function successPage(guardName: string, amount: string) {
 <body>
   <div class="card">
     <div class="icon">✅</div>
-    <h1>Payment Successful!</h1>
-    <div class="amount">${amount ? `R${parseFloat(amount).toFixed(2)}` : ''}</div>
-    <p>Your tip to <span class="guard">${esc(guardName) || 'your car guard'}</span> has been received. They will be notified shortly.</p>
+    <h1>${confirmed ? 'Payment Successful!' : 'Thank you!'}</h1>
+    <div class="amount">${amountText}</div>
+    <p>Your tip to <span class="guard">${esc(guardName) || 'your car guard'}</span> ${confirmed ? 'has been received. They will be notified shortly.' : 'is being processed. They will be notified as soon as your bank confirms it.'}</p>
     <p class="close-note">You can close this tab and return to the app.</p>
     <p class="tippa">Powered by Tippa</p>
   </div>
@@ -131,37 +133,49 @@ function declinePage(reason: string) {
 
 // ─── Netcash redirect endpoints ───────────────────────────────────────────────
 
-/**
- * GET /api/payments/netcash/accept
- * Netcash redirects the customer browser here after a SUCCESSFUL payment (m5 URL).
- * Netcash sends query params: p2 (reference), p3 (description), p4 (amount), m1, etc.
- */
-router.get('/netcash/accept', (req: Request, res: Response) => {
-  const { p3, p4 } = req.query as Record<string, string>
-  // p3 = description (e.g. "Tip for John Doe"), p4 = amount
-  const guardName = p3 ? p3.replace(/^Tip for /i, '') : ''
-  console.log('✅ Netcash accept redirect:', { ref: req.query.p2, amount: p4, desc: p3 })
-  res.send(successPage(guardName, p4))
-})
+// Netcash form-POSTs the customer back after "Complete transaction"; a plain
+// browser visit arrives as GET. Both must render a page, never JSON.
+function readParams(req: Request): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const src of [req.query, req.body]) {
+    if (!src || typeof src !== 'object') continue
+    for (const [k, v] of Object.entries(src)) {
+      if (v !== undefined && v !== null) out[k] = String(Array.isArray(v) ? v[0] : v)
+    }
+  }
+  return out
+}
 
-/**
- * GET /api/payments/netcash/decline
- * Netcash redirects the customer browser here when the payment is DECLINED or CANCELLED.
- */
-router.get('/netcash/decline', (req: Request, res: Response) => {
-  const { reason } = req.query as Record<string, string>
-  console.log('❌ Netcash decline redirect:', req.query)
-  res.send(declinePage(reason || ''))
-})
+function renderResult(req: Request, res: Response, defaultOutcome: 'accept' | 'decline' | 'unknown') {
+  const p = readParams(req)
+  const accepted = (p.TransactionAccepted ?? '').toLowerCase()
+  const outcome =
+    accepted === 'true' ? 'accept' : accepted === 'false' ? 'decline' : defaultOutcome
 
-/**
- * GET /api/payments/return  (legacy alias — same as accept)
- */
-router.get('/return', (req: Request, res: Response) => {
-  const { p3, p4 } = req.query as Record<string, string>
-  const guardName = p3 ? p3.replace(/^Tip for /i, '') : ''
-  console.log('↩️  Netcash return redirect:', { ref: req.query.p2, amount: p4 })
-  res.send(successPage(guardName, p4))
-})
+  const description = p.p3 || p.Description || ''
+  const guardName = description.replace(/^Tip for /i, '')
+  const amount = p.Amount || p.p4 || ''
+
+  console.log('Netcash customer return:', {
+    path: req.path,
+    method: req.method,
+    outcome,
+    ref: p.Reference || p.p2,
+    amount,
+  })
+
+  res.set('Content-Type', 'text/html; charset=utf-8')
+  if (outcome === 'decline') {
+    res.send(declinePage(p.Reason || p.reason || ''))
+  } else {
+    res.send(successPage(guardName, amount, outcome === 'accept'))
+  }
+}
+
+router.all('/netcash/accept', (req, res) => renderResult(req, res, 'accept'))
+router.all('/netcash/decline', (req, res) => renderResult(req, res, 'decline'))
+// Re-direct URL (customer returning from their bank, e.g. Instant EFT) — outcome may not be known yet.
+router.all('/netcash/redirect', (req, res) => renderResult(req, res, 'unknown'))
+router.all('/return', (req, res) => renderResult(req, res, 'unknown'))
 
 export default router
