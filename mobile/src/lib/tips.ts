@@ -1,6 +1,7 @@
 /**
- * Shared tip helpers for the CTA app: the two QR codes, status styling, and one tip
- * feed that puts both lanyards side by side.
+ * Shared tip helpers for the CTA app. To a CTA a tip is a tip, whichever QR the
+ * customer scanned: one list, one total, one set of statuses. Which QR was used is
+ * kept only as a small "via" note.
  *
  *   Tippa QR (Auto, the new lanyard): the customer scans, picks an amount and pays.
  *     Every step is visible, including tips that do not finish.
@@ -21,12 +22,12 @@ export type FeedStatus = AttemptStatus | 'UNCONFIRMED';
 
 export const STATUS_STYLE: Record<FeedStatus, { label: string; color: string; bg: string; icon: string }> = {
   SUCCESS: { label: 'Paid', color: '#047857', bg: '#D1FAE5', icon: 'checkmark-circle' },
-  PENDING: { label: 'Waiting', color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' },
-  IN_PROGRESS: { label: 'In progress', color: '#6D28D9', bg: '#EDE9FE', icon: 'ellipsis-horizontal-circle' },
-  INCOMPLETE: { label: 'Not finished', color: '#B45309', bg: '#FEF3C7', icon: 'return-down-back' },
-  ABANDONED: { label: 'Left', color: '#4B5563', bg: '#F3F4F6', icon: 'hand-left' },
+  PENDING: { label: 'Pending', color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' },
+  IN_PROGRESS: { label: 'Pending', color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' },
+  INCOMPLETE: { label: 'Not completed', color: '#B45309', bg: '#FEF3C7', icon: 'return-down-back' },
+  ABANDONED: { label: 'Not completed', color: '#B45309', bg: '#FEF3C7', icon: 'return-down-back' },
   FAILED: { label: 'Failed', color: '#B91C1C', bg: '#FEE2E2', icon: 'close-circle' },
-  UNCONFIRMED: { label: 'Unconfirmed', color: '#B45309', bg: '#FEF3C7', icon: 'help-circle' },
+  UNCONFIRMED: { label: 'Pending', color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' },
 };
 
 export const CHANNEL_STYLE: Record<TipChannel, { label: string; short: string; color: string; bg: string; icon: string }> = {
@@ -38,11 +39,9 @@ export const CHANNEL_STYLE: Record<TipChannel, { label: string; short: string; c
 /** What each label means, shown in the app so nothing is a mystery. */
 export const STATUS_HELP: { status: FeedStatus; text: string }[] = [
   { status: 'SUCCESS', text: 'The customer paid. The money is on your balance.' },
-  { status: 'PENDING', text: 'The customer paid or is paying. Netcash has not confirmed yet. It updates by itself.' },
-  { status: 'INCOMPLETE', text: 'The customer reached the payment page but came back without paying.' },
-  { status: 'ABANDONED', text: 'The customer left before paying. No money was taken.' },
-  { status: 'FAILED', text: 'The payment was tried but did not go through (for example declined by the bank).' },
-  { status: 'UNCONFIRMED', text: 'Netcash replied but our old system misread it. Not a confirmed failure.' },
+  { status: 'PENDING', text: 'The customer paid or is paying. Netcash has not confirmed yet. It updates by itself within 15 minutes.' },
+  { status: 'INCOMPLETE', text: 'The customer started a tip but did not pay. No money was taken. The reason is shown on the tip.' },
+  { status: 'FAILED', text: 'The payment was tried but did not go through, for example declined by the bank. The reason is shown on the tip.' },
 ];
 
 export interface FeedItem {
@@ -90,7 +89,11 @@ export function buildTipFeed(attempts: TipAttempt[], transactions: Transaction[]
   return feed.sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime());
 }
 
-export const rand = (v: number | null | undefined) => (v == null ? '—' : `R${Number(v).toFixed(2)}`);
+/** The small grey note under a tip saying which QR the customer scanned. */
+export const viaLabel = (channel?: TipChannel | null) =>
+  channel === 'TIPPA_QR' ? 'via Tippa QR' : channel === 'NETCASH_QR' ? 'via Netcash QR' : null;
+
+export const rand = (v: number | null | undefined) => (v == null ? 'No amount chosen' : `R${Number(v).toFixed(2)}`);
 
 /** "Just now", "12 min ago", "Today 14:05", "Yesterday 09:30", "3 Oct 16:20" */
 export function when(iso: string) {

@@ -1378,7 +1378,7 @@ router.post('/mobile/me/notifications/test', mobileAuth, async (req: Request, re
   try {
     const guardId = req.guard!.guardId
     const { notifyGuard } = await import('../lib/notifications')
-    await notifyGuard(guardId, 'TIP_RECEIVED', 'Test notification', 'This is a test — notifications are working!', { test: true })
+    await notifyGuard(guardId, 'TIP_RECEIVED', 'Test notification', 'This is a test. Notifications are working!', { test: true })
     return res.json({ success: true, message: 'Test notification created' })
   } catch (error) {
     console.error('❌ Test notification error:', error)

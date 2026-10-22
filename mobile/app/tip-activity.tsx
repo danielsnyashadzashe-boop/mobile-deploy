@@ -14,14 +14,16 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { getTipActivity, getTransactions, TipActivity, Transaction } from '../services/mobileApiService';
 import { TipFeedRow } from '../components/TipFeedRow';
-import { buildTipFeed, CHANNEL_STYLE, STATUS_HELP, STATUS_STYLE, FeedItem, rand } from '../src/lib/tips';
+import { buildTipFeed, STATUS_HELP, STATUS_STYLE, FeedItem, rand } from '../src/lib/tips';
+import { useLiveRefresh } from '../src/lib/useLiveRefresh';
 
 const PERIODS = [7, 30, 90];
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'paid', label: 'Paid' },
-  { key: 'waiting', label: 'Waiting' },
+  { key: 'pending', label: 'Pending' },
   { key: 'not', label: 'Not completed' },
+  { key: 'failed', label: 'Failed' },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]['key'];
 
@@ -48,24 +50,28 @@ export default function TipActivityScreen() {
   }, [token, days]);
 
   useEffect(() => { setLoading(true); load(); }, [load]);
+  useLiveRefresh(load);
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const feed = useMemo(() => {
     if (!activity) return [];
     const since = Date.now() - days * 86400000;
-    const all = buildTipFeed(activity.attempts, transactions).filter(i => new Date(i.at).getTime() >= since);
-    return all.filter(i => {
-      if (filter === 'paid') return i.status === 'SUCCESS';
-      if (filter === 'waiting') return i.status === 'PENDING' || i.status === 'IN_PROGRESS';
-      if (filter === 'not') return ['FAILED', 'INCOMPLETE', 'ABANDONED', 'UNCONFIRMED'].includes(i.status);
-      return true;
-    });
-  }, [activity, transactions, filter, days]);
+    return buildTipFeed(activity.attempts, transactions).filter(i => new Date(i.at).getTime() >= since);
+  }, [activity, transactions, days]);
 
-  const s = activity?.summary;
-  const tippa = activity?.byChannel?.TIPPA_QR;
-  const netcash = activity?.byChannel?.NETCASH_QR;
+  // Filters and counts go by the label, so tips from both QR codes are grouped the same way.
+  const shown = useMemo(() => feed.filter(i => {
+    const label = STATUS_STYLE[i.status].label;
+    if (filter === 'paid') return label === 'Paid';
+    if (filter === 'pending') return label === 'Pending';
+    if (filter === 'not') return label === 'Not completed';
+    if (filter === 'failed') return label === 'Failed';
+    return true;
+  }), [feed, filter]);
+
+  const count = (label: string) => feed.filter(i => STATUS_STYLE[i.status].label === label).length;
+  const paidTotal = feed.filter(i => i.status === 'SUCCESS').reduce((sum, i) => sum + (i.received ?? i.amount ?? 0), 0);
 
   const Header = (
     <View>
@@ -80,13 +86,14 @@ export default function TipActivityScreen() {
           </TouchableOpacity>
         </View>
         <Text style={{ color: '#FFFFFF', fontSize: 26, fontFamily: 'Nunito-Bold', marginTop: 14 }}>Tip activity</Text>
-        <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, fontFamily: 'Nunito-Regular', marginTop: 2 }}>Every tip from your Tippa QR and Netcash QR, and what happened to it.</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, fontFamily: 'Nunito-Regular', marginTop: 2 }}>Every tip you received or nearly received, and what happened to it.</Text>
 
         <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 16, padding: 14, marginTop: 16 }}>
           {[
-            { label: 'Paid', value: s?.paid ?? 0, color: '#6EE7B7' },
-            { label: 'Waiting', value: s?.waiting ?? 0, color: '#BFDBFE' },
-            { label: 'Not completed', value: s?.notCompleted ?? 0, color: '#FCA5A5' },
+            { label: 'Paid', value: count('Paid'), color: '#6EE7B7' },
+            { label: 'Pending', value: count('Pending'), color: '#BFDBFE' },
+            { label: 'Not completed', value: count('Not completed'), color: '#FDE68A' },
+            { label: 'Failed', value: count('Failed'), color: '#FCA5A5' },
           ].map((x, i) => (
             <View key={x.label} style={{ flex: 1, alignItems: 'center', borderLeftWidth: i ? 1 : 0, borderLeftColor: 'rgba(255,255,255,0.2)' }}>
               <Text style={{ fontSize: 22, fontFamily: 'Nunito-Bold', color: x.color }}>{x.value}</Text>
@@ -95,7 +102,7 @@ export default function TipActivityScreen() {
           ))}
         </View>
         <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, fontFamily: 'Nunito-Regular', marginTop: 8, textAlign: 'center' }}>
-          Counts are for Tippa QR tips. Netcash QR tips only appear once paid.
+          {rand(paidTotal)} received in the last {days} days
         </Text>
       </LinearGradient>
 
@@ -115,26 +122,8 @@ export default function TipActivityScreen() {
         </View>
       )}
 
-      {/* Both lanyards side by side */}
-      <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 12, marginTop: showHelp ? 0 : 12 }}>
-        {[
-          { key: 'TIPPA_QR' as const, data: tippa, note: 'New lanyard · every step tracked' },
-          { key: 'NETCASH_QR' as const, data: netcash, note: activity?.hasNetcashQr ? 'Original lanyard · shows once paid' : 'No Netcash QR on file' },
-        ].map(x => (
-          <View key={x.key} style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#E5E7EB' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <Ionicons name={CHANNEL_STYLE[x.key].icon as any} size={14} color={CHANNEL_STYLE[x.key].color} />
-              <Text style={{ fontSize: 13, fontFamily: 'Nunito-Bold', color: CHANNEL_STYLE[x.key].color }}>{CHANNEL_STYLE[x.key].label}</Text>
-            </View>
-            <Text style={{ fontSize: 20, fontFamily: 'Nunito-Bold', color: '#111827', marginTop: 6 }}>{rand(x.data?.received ?? 0)}</Text>
-            <Text style={{ fontSize: 11, fontFamily: 'Nunito-Regular', color: '#6B7280' }}>{x.data?.count ?? 0} paid tip{(x.data?.count ?? 0) === 1 ? '' : 's'} · last {days} days</Text>
-            <Text style={{ fontSize: 10, fontFamily: 'Nunito-Regular', color: '#9CA3AF', marginTop: 4 }}>{x.note}</Text>
-          </View>
-        ))}
-      </View>
-
       {/* Period and filter */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 12, marginTop: 14, gap: 6 }}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: 12, marginTop: 12, gap: 6 }}>
         {PERIODS.map(p => (
           <TouchableOpacity key={p} onPress={() => setDays(p)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: days === p ? '#11468F' : '#E5E7EB' }}>
             <Text style={{ fontSize: 12, fontFamily: 'Nunito-SemiBold', color: days === p ? '#FFFFFF' : '#4B5563' }}>{p} days</Text>
@@ -154,7 +143,7 @@ export default function TipActivityScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F9FAFB' }} edges={['top', 'left', 'right']}>
       <FlatList
-        data={feed}
+        data={shown}
         keyExtractor={(i: FeedItem) => i.key}
         renderItem={({ item }) => <TipFeedRow item={item} />}
         ListHeaderComponent={Header}

@@ -54,6 +54,7 @@ interface LinkAccountResponse {
 }
 
 export interface Transaction {
+  noAmount?: boolean; // an attempt left before an amount was chosen
   id: string;
   type: string;
   amount: number;

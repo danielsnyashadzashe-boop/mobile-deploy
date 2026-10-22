@@ -20,13 +20,50 @@ import Reanimated, { FadeInDown, FadeIn, ZoomIn } from 'react-native-reanimated'
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatDate } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
-import { getTransactions, Transaction } from '../../services/mobileApiService';
-import { CHANNEL_STYLE } from '../../src/lib/tips';
+import { getTransactions, getTipActivity, Transaction, TipAttempt } from '../../services/mobileApiService';
+import { localDay, viaLabel } from '../../src/lib/tips';
+import { useLiveRefresh } from '../../src/lib/useLiveRefresh';
+
+/**
+ * Tippa QR tips that did not complete (failed, not finished, left, waiting) are not
+ * money movements, so they have no transaction record. They are listed here anyway,
+ * as transactions, so a CTA sees every tip attempt in one place with what happened.
+ * They never count towards income.
+ */
+function attemptToRow(a: TipAttempt): Transaction {
+  const status = a.status === 'FAILED' ? 'FAILED'
+    : a.status === 'PENDING' || a.status === 'IN_PROGRESS' ? 'PENDING'
+    : 'NOT_COMPLETED';
+  const at = new Date(a.updatedAt);
+  return {
+    id: `attempt-${a.id}`,
+    type: 'TIP',
+    amount: a.amount ?? 0,
+    noAmount: a.amount == null,
+    description: status === 'FAILED' ? 'Tip failed' : status === 'PENDING' ? 'Tip pending' : 'Tip not completed',
+    status,
+    reference: a.reference,
+    balance: null,
+    date: localDay(at),
+    time: at.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+    createdAt: a.updatedAt,
+    failureReason: a.statusLabel,
+    channel: 'TIPPA_QR',
+    channelLabel: 'Tippa QR',
+    explanation: a.explanation,
+    metadata: { fromAttempt: true },
+  };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isFailed(tx: Transaction) {
-  return tx.status === 'FAILED' || tx.status === 'REVERSED';
+  return tx.status === 'FAILED' || tx.status === 'REVERSED' || tx.status === 'NOT_COMPLETED';
+}
+
+/** Netcash has not confirmed yet: neither failed nor money. */
+function isPending(tx: Transaction) {
+  return tx.status === 'PENDING';
 }
 
 /** Netcash replied but the old system misread it: not a confirmed failure. */
@@ -76,10 +113,10 @@ function FailedBanner({ count }: { count: number }) {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={hStyles.bannerTitle}>
-            {count} failed payment{count !== 1 ? 's' : ''}
+            {count} tip{count !== 1 ? 's' : ''} did not complete
           </Text>
           <Text style={hStyles.bannerBody}>
-            These were attempts by customers that didn't go through their bank. No funds reached your account for these — it's not money the company is holding back.
+            Customers started these tips but they failed or were not finished. No money was taken from the customers and none is owed to you for them. Each one shows what happened.
           </Text>
         </View>
       </LinearGradient>
@@ -91,7 +128,6 @@ function FailedBanner({ count }: { count: number }) {
 function TxRow({ item, index }: { item: Transaction; index: number }) {
   const failed = isFailed(item);
   const unconfirmed = isUnconfirmed(item);
-  const channel = item.channel ? CHANNEL_STYLE[item.channel] : null;
 
   const iconMap: Record<string, { name: string; color: string }> = {
     TIP:         { name: 'cash',            color: '#10B981' },
@@ -109,12 +145,14 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
   const isIncome = item.amount > 0;
   const hasCommission = (item as any).metadata?.commissionAmount > 0;
   const reason = item.explanation || item.failureReason || 'Payment didn\'t go through';
-  const pill = item.status === 'REVERSED' ? 'Reversed' : 'Failed';
+  const pending = isPending(item);
+  const pill = item.status === 'REVERSED' ? 'Reversed' : item.status === 'NOT_COMPLETED' ? 'Not completed' : 'Failed';
 
   const metaParts = [
     formatDate(item.date),
     item.time,
     item.paymentMethod,
+    item.type?.toUpperCase() === 'TIP' ? viaLabel(item.channel) : null,
   ].filter(Boolean).join(' · ');
 
   return (
@@ -141,15 +179,14 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
                 <Text style={hStyles.failedBadgeText}>{pill}</Text>
               </View>
             )}
-            {unconfirmed && (
-              <View style={hStyles.unconfirmedBadge}>
-                <Text style={hStyles.unconfirmedBadgeText}>Unconfirmed</Text>
+            {pending && (
+              <View style={hStyles.pendingBadge}>
+                <Text style={hStyles.pendingBadgeText}>Pending</Text>
               </View>
             )}
-            {channel && (
-              <View style={[hStyles.channelBadge, { backgroundColor: channel.bg }]}>
-                <Ionicons name={channel.icon as any} size={9} color={channel.color} />
-                <Text style={[hStyles.channelBadgeText, { color: channel.color }]}>{channel.short}</Text>
+            {unconfirmed && (
+              <View style={hStyles.unconfirmedBadge}>
+                <Text style={hStyles.unconfirmedBadgeText}>Pending</Text>
               </View>
             )}
             {!failed && (item as any).isAutomatic && (
@@ -159,8 +196,10 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
               </View>
             )}
           </View>
-          {failed || unconfirmed ? (
-            <Text style={hStyles.txAmountStruck}>
+          {(item as any).noAmount ? (
+            <Text style={hStyles.noAmount}>No amount chosen</Text>
+          ) : failed || unconfirmed || pending ? (
+            <Text style={[hStyles.txAmountStruck, pending && { textDecorationLine: 'none' }]}>
               {isIncome ? '+' : ''}{formatCurrency(Math.abs(item.amount))}
             </Text>
           ) : (
@@ -178,6 +217,14 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
           )}
         </View>
 
+        {/* waiting: say plainly what it is */}
+        {pending && !!item.explanation && (
+          <View style={hStyles.pendingBox}>
+            <Ionicons name="time-outline" size={13} color="#1D4ED8" style={{ marginTop: 1 }} />
+            <Text style={hStyles.pendingText}>{item.explanation}</Text>
+          </View>
+        )}
+
         {/* unconfirmed: say plainly what it is */}
         {unconfirmed && (
           <View style={hStyles.unconfirmedBox}>
@@ -187,7 +234,7 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
         )}
 
         {/* completed tips: how much reached the balance */}
-        {!failed && !unconfirmed && item.type?.toUpperCase() === 'TIP' && !!item.explanation && (
+        {!failed && !unconfirmed && !pending && item.type?.toUpperCase() === 'TIP' && !!item.explanation && (
           <Text style={hStyles.txExplain}>{item.explanation}</Text>
         )}
 
@@ -241,11 +288,14 @@ export default function HistoryScreen() {
     else { setError('Not authenticated. Please sign in again.'); setLoading(false); }
   }, [token]);
 
-  const loadData = async () => {
+  // Quiet reloads keep the list on screen instead of showing the spinner.
+  useLiveRefresh(() => { if (token) loadData(true); });
+
+  const loadData = async (quiet = false) => {
     if (!token) return;
     try {
-      setError(null);
-      setLoading(true);
+      if (!quiet) setError(null);
+      if (!quiet) setLoading(true);
       const response = await getTransactions('', { limit: 100 }, token);
       if (!response.success) {
         const err = response.error || '';
@@ -256,7 +306,18 @@ export default function HistoryScreen() {
         setError(err || 'Failed to load transactions');
         return;
       }
-      setTransactions(response.data?.transactions || []);
+      const txs: Transaction[] = response.data?.transactions || [];
+      // Tippa QR attempts that did not complete, for the last 90 days.
+      const activity = await getTipActivity(token, 90);
+      const attempts = activity.success ? (activity.data?.attempts || []) : [];
+      const unfinished = attempts.filter(a => a.status !== 'SUCCESS');
+      // The attempt row is the accurate one: drop old transaction rows for the same
+      // attempt (the "unconfirmed" records the old system wrote).
+      const attemptRefs = new Set(unfinished.map(a => a.reference).filter(Boolean) as string[]);
+      const kept = txs.filter(t => !(t.status !== 'COMPLETED' && (attemptRefs.has(t.reference || '') || attemptRefs.has(String((t.metadata as any)?.tippaReference || '')))));
+      const merged = [...kept, ...unfinished.map(attemptToRow)]
+        .sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
+      setTransactions(merged);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data.');
     } finally {
@@ -394,7 +455,7 @@ export default function HistoryScreen() {
 
   // ── Empty state label ────────────────────────────────────────────────────────
   const emptyLabel = selectedFilter === 'failed'
-    ? 'No failed payments — all good!'
+    ? 'No failed payments. All good!'
     : `No ${selectedFilter !== 'all' ? selectedFilter + ' ' : ''}transactions for ${selectedPeriod}.`;
 
   return (
@@ -501,7 +562,7 @@ export default function HistoryScreen() {
                 <View style={hStyles.errorCard}>
                   <Text style={hStyles.errorCardText}>{error}</Text>
                 </View>
-                <TouchableOpacity style={hStyles.retryBtn} onPress={loadData}>
+                <TouchableOpacity style={hStyles.retryBtn} onPress={() => loadData()}>
                   <Text style={hStyles.retryText}>Try Again</Text>
                 </TouchableOpacity>
               </Reanimated.View>
@@ -515,7 +576,7 @@ export default function HistoryScreen() {
                   />
                 </View>
                 <Text style={hStyles.stateTitle}>
-                  {selectedFilter === 'failed' ? 'No failed payments — all good!' : 'No transactions'}
+                  {selectedFilter === 'failed' ? 'No failed payments. All good!' : 'No transactions'}
                 </Text>
                 <Text style={hStyles.stateText}>{emptyLabel}</Text>
               </Reanimated.View>
@@ -565,12 +626,12 @@ export default function HistoryScreen() {
                 <Reanimated.View entering={ZoomIn.springify().damping(16)} style={hStyles.rangeDisplay}>
                   <View style={hStyles.rangeItem}>
                     <Text style={hStyles.rangeLabel}>From</Text>
-                    <Text style={hStyles.rangeDate}>{customStartDate || '—'}</Text>
+                    <Text style={hStyles.rangeDate}>{customStartDate || 'Pick a date'}</Text>
                   </View>
                   <Ionicons name="arrow-forward" size={16} color="#9CA3AF" />
                   <View style={hStyles.rangeItem}>
                     <Text style={hStyles.rangeLabel}>To</Text>
-                    <Text style={hStyles.rangeDate}>{customEndDate || '—'}</Text>
+                    <Text style={hStyles.rangeDate}>{customEndDate || 'Pick a date'}</Text>
                   </View>
                 </Reanimated.View>
               )}
@@ -718,6 +779,11 @@ const hStyles = StyleSheet.create({
   autoBadgeText: { fontSize: 10, fontFamily: 'Nunito-Bold', color: '#059669' },
   failedBadge:   { backgroundColor: '#FEE2E2', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   unconfirmedBadge:{ backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  noAmount:      { fontSize: 12, fontFamily: 'Nunito-SemiBold', color: '#9CA3AF' },
+  pendingBadge:  { backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  pendingBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: 0.3 },
+  pendingBox:    { flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, backgroundColor: '#EFF6FF', borderRadius: 8, padding: 8 },
+  pendingText:   { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#1E3A8A', flex: 1, lineHeight: 16 },
   unconfirmedBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#B45309', textTransform: 'uppercase', letterSpacing: 0.3 },
   channelBadge:  { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   channelBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold' },

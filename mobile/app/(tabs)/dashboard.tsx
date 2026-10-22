@@ -24,6 +24,7 @@ import { getTransactions, getTipActivity, TipAttempt } from '../../services/mobi
 import { QrCodesCard } from '../../components/QrCodesCard';
 import { TipFeedRow } from '../../components/TipFeedRow';
 import { buildTipFeed, localDay, tipLinkFor } from '../../src/lib/tips';
+import { useLiveRefresh } from '../../src/lib/useLiveRefresh';
 
 type AlertModalState = { visible: boolean; type: 'success' | 'error' | 'info'; title: string; message: string };
 
@@ -34,7 +35,7 @@ export default function DashboardScreen() {
   const { unreadCount } = useNotifications();
   const guardData = rawGuardData ?? (authGuard ? {
     id: authGuard.guardId,
-    guardId: authGuard.guardPublicId,
+    guardId: (authGuard as any).guardPublicId ?? authGuard.guardId,
     name: authGuard.phone,
     surname: '',
     fullName: authGuard.phone,
@@ -74,6 +75,9 @@ export default function DashboardScreen() {
       setLoading(false);
     }
   }, [authGuard, token]);
+
+  // Recent tips and today's totals stay current while the dashboard is open.
+  useLiveRefresh(() => { if (authGuard && token) loadAdditionalData(); });
 
   const loadAdditionalData = async () => {
     if (!authGuard) return;

@@ -56,12 +56,13 @@ export const LanyardCard = forwardRef<View, Props>(function LanyardCard({ varian
           <Text style={[font(7.6, false, '#64748B'), { marginTop: mm(0.6) }]}>No app needed. Tip in seconds with your phone.</Text>
 
           {/* The code in a thin grey frame, Tippa logo in the middle (highest error correction keeps it scannable) */}
-          <View style={{ marginTop: mm(3), padding: mm(4), borderWidth: Math.max(1, mm(0.35)), borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' }}>
+          <View style={{ marginTop: mm(3), padding: mm(1), borderWidth: Math.max(1, mm(0.35)), borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' }}>
             {tipLink ? (
               <View style={{ width: mm(78), height: mm(78), alignItems: 'center', justifyContent: 'center' }}>
-                <QRCode value={tipLink} size={mm(78)} color="#1E1B4B" backgroundColor="#FFFFFF" ecl="H" quietZone={0} />
+                {/* A white margin of about four squares round the code, as scanners expect. */}
+                <QRCode value={tipLink} size={mm(70)} color="#1E1B4B" backgroundColor="#FFFFFF" ecl="H" quietZone={mm(4)} />
                 <View style={{ position: 'absolute', backgroundColor: '#FFFFFF', borderRadius: mm(2.5), paddingHorizontal: mm(1.8), paddingVertical: mm(1.2) }}>
-                  <BrandLogo width={mm(19)} />
+                  <BrandLogo width={mm(14)} />
                 </View>
               </View>
             ) : (

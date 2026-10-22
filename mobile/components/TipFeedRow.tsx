@@ -1,17 +1,17 @@
 /**
- * One tip in the tip feed, from either lanyard: which QR it came through, what
- * happened (status), the amount, and one plain sentence explaining it. Tippa QR tips
- * can be opened to see each step the customer took and when.
+ * One tip in the tip feed: what happened (status), the amount, and one plain
+ * sentence explaining it, the same for both QR codes. Tips with recorded steps can be
+ * opened to see each step the customer took and when.
  */
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { CHANNEL_STYLE, STATUS_STYLE, STEP_LABEL, FeedItem, rand, when } from '../src/lib/tips';
+import { STATUS_STYLE, STEP_LABEL, FeedItem, rand, viaLabel, when } from '../src/lib/tips';
 
 export function TipFeedRow({ item, compact = false }: { item: FeedItem; compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const s = STATUS_STYLE[item.status];
-  const c = CHANNEL_STYLE[item.channel];
+  const via = viaLabel(item.channel);
   const paid = item.status === 'SUCCESS';
   const steps = item.attempt?.steps || [];
   const canOpen = !compact && steps.length > 0;
@@ -29,12 +29,8 @@ export function TipFeedRow({ item, compact = false }: { item: FeedItem; compact?
             <View style={{ backgroundColor: s.bg, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
               <Text style={{ fontSize: 11, fontFamily: 'Nunito-Bold', color: s.color }}>{s.label}</Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: c.bg, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
-              <Ionicons name={c.icon as any} size={10} color={c.color} />
-              <Text style={{ fontSize: 10, fontFamily: 'Nunito-Bold', color: c.color }}>{c.label}</Text>
-            </View>
           </View>
-          <Text style={{ fontSize: 15, fontFamily: 'Nunito-Bold', color: paid ? '#059669' : '#9CA3AF', textDecorationLine: paid || item.status === 'PENDING' || item.status === 'IN_PROGRESS' ? 'none' : 'line-through' }}>
+          <Text style={{ fontSize: 15, fontFamily: 'Nunito-Bold', color: paid ? '#059669' : '#9CA3AF', textDecorationLine: paid || item.amount == null || s.label === 'Pending' ? 'none' : 'line-through' }}>
             {paid ? `+${rand(item.received ?? item.amount)}` : rand(item.amount)}
           </Text>
         </View>
@@ -44,7 +40,7 @@ export function TipFeedRow({ item, compact = false }: { item: FeedItem; compact?
         </Text>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 5 }}>
-          <Text style={{ fontSize: 11, fontFamily: 'Nunito-Regular', color: '#9CA3AF' }}>{when(item.at)}</Text>
+          <Text style={{ fontSize: 11, fontFamily: 'Nunito-Regular', color: '#9CA3AF' }}>{when(item.at)}{via ? ` · ${via}` : ''}</Text>
           {canOpen && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
               <Text style={{ fontSize: 11, fontFamily: 'Nunito-SemiBold', color: '#5B94D3' }}>{open ? 'Hide steps' : 'See steps'}</Text>

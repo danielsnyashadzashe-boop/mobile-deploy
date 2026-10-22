@@ -73,9 +73,10 @@ export function QrCodesCard({ name, guardId, siteName, status, tipLink, netcashQ
     if (which === 'tippa') {
       return tipLink ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-          <QRCode value={tipLink} size={size} color="#1E1B4B" backgroundColor="#FFFFFF" ecl="H" quietZone={0} />
-          <View style={{ position: 'absolute', backgroundColor: '#FFFFFF', borderRadius: 8, paddingHorizontal: size * 0.025, paddingVertical: size * 0.018 }}>
-            <BrandLogo width={size * 0.24} />
+          {/* White margin (quiet zone) of about four squares so phone cameras lock on fast. */}
+          <QRCode value={tipLink} size={size - Math.round(size * 0.14)} color="#1E1B4B" backgroundColor="#FFFFFF" ecl="H" quietZone={Math.round(size * 0.07)} />
+          <View style={{ position: 'absolute', backgroundColor: '#FFFFFF', borderRadius: 6, paddingHorizontal: size * 0.015, paddingVertical: size * 0.012 }}>
+            <BrandLogo width={size * 0.17} />
           </View>
         </View>
       ) : (

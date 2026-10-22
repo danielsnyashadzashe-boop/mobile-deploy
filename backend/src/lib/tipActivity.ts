@@ -21,7 +21,7 @@ export type TipChannel = 'TIPPA_QR' | 'NETCASH_QR' | 'OTHER'
 
 const QR_TEST_ENTITY = 'NetcashQrTest'
 const NETCASH_TIMEOUT_MS = 15 * 60 * 1000 // no word from Netcash this long after Pay -> abandoned
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000 // tip page untouched this long without Pay -> abandoned
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000 // tip page untouched this long without Pay -> abandoned
 const MISREAD = /result code: undefined/ // old admin code saved every Netcash reply as failed
 
 export const LIVE_SITE = process.env.PUBLIC_TIP_BASE_URL || 'https://www.tippapaymentsolutions.com'
