@@ -64,6 +64,42 @@ export interface Transaction {
   date: string;
   time: string;
   createdAt: string;
+  failureReason?: string;
+  paymentMethod?: string | null;
+  metadata?: Record<string, unknown> | null;
+  /** Tips only: which QR the tip came through. */
+  channel?: TipChannel;
+  channelLabel?: string;
+  /** Plain explanation of what happened, written for the CTA. */
+  explanation?: string;
+}
+
+export type TipChannel = 'TIPPA_QR' | 'NETCASH_QR' | 'OTHER';
+export type AttemptStatus = 'SUCCESS' | 'PENDING' | 'FAILED' | 'INCOMPLETE' | 'ABANDONED' | 'IN_PROGRESS';
+
+/** One Tippa QR tip attempt: a customer scanned the CTA's Tippa QR. */
+export interface TipAttempt {
+  id: string;
+  status: AttemptStatus;
+  statusLabel: string;
+  explanation: string;
+  amount: number | null;
+  received: number | null;
+  reference: string | null;
+  startedAt: string;
+  updatedAt: string;
+  paidAt: string | null;
+  secondsToPay: number | null;
+  steps: { at: string; kind: string; amount: string | null }[];
+}
+
+export interface TipActivity {
+  days: number;
+  tipLink: string;
+  hasNetcashQr: boolean;
+  summary: { attempts: number; paid: number; waiting: number; notCompleted: number; failed: number };
+  byChannel: Record<TipChannel, { count: number; received: number }>;
+  attempts: TipAttempt[];
 }
 
 export interface Payout {
@@ -710,6 +746,104 @@ export interface AutoPayoutSettings {
   amountUntilAutoPayout: number;
 }
 
+/**
+ * Get the logged-in guard's payout requests (JWT auth)
+ */
+export async function getMyPayouts(token: string): Promise<ApiResponse<PayoutRequest[]>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/payouts`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to fetch payouts' };
+    }
+    return { success: true, data: result.data };
+  } catch (error) {
+    console.error('Error fetching payouts:', error);
+    return { success: false, error: 'Failed to fetch payouts' };
+  }
+}
+
+/**
+ * Submit a payout request (JWT auth)
+ */
+export async function submitPayoutRequest(
+  amount: number,
+  token: string,
+  notes?: string,
+  method?: 'VOUCHER' | 'BANK_TRANSFER'
+): Promise<ApiResponse<{ payoutId: string; amount: number; status: string; method: string; requestedAt: string; currentBalance: number; note: string }>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/payout/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ amount, notes: notes || '', method: method || 'VOUCHER' }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to submit payout request' };
+    }
+    return result;
+  } catch (error) {
+    console.error('Error submitting payout request:', error);
+    return { success: false, error: 'Something went wrong. Please check your connection and try again.' };
+  }
+}
+
+/**
+ * Update the logged-in guard's profile (JWT auth)
+ */
+export async function updateMyProfile(
+  data: {
+    name?: string;
+    surname?: string;
+    phone?: string;
+    bankName?: string;
+    accountNumber?: string;
+    accountHolder?: string;
+    branchCode?: string;
+    accountType?: string;
+  },
+  token: string
+): Promise<ApiResponse<GuardData>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to update profile' };
+    }
+    return { success: true, data: result.data };
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    return { success: false, error: 'Failed to update profile. Please try again.' };
+  }
+}
+
+/**
+ * Tippa QR tip attempts (paid, waiting, failed, not finished, left) with explanations,
+ * and completed tips per QR (Tippa QR and Netcash QR).
+ */
+export async function getTipActivity(token: string, days = 30): Promise<ApiResponse<TipActivity>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/tip-activity?days=${days}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to fetch tip activity' };
+    }
+    return result;
+  } catch (error) {
+    console.error('Error fetching tip activity:', error);
+    return { success: false, error: 'Failed to fetch tip activity' };
+  }
+}
+
 export async function getAutoPayoutSettings(token: string): Promise<ApiResponse<AutoPayoutSettings>> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/mobile/me/auto-payout-settings`, {
@@ -743,6 +877,9 @@ export default {
   requestBankTransfer,
   requestPayout,
   getPayoutRequests,
+  getMyPayouts,
+  submitPayoutRequest,
   getAutoPayoutSettings,
+  getTipActivity,
   NETWORK_CODES,
 };

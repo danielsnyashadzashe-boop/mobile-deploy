@@ -1,0 +1,47 @@
+import prisma from './prisma'
+import { sendExpoPush } from './expoPush'
+
+export async function notifyGuard(
+  guardInternalId: string,
+  type: string,
+  title: string,
+  message: string,
+  metadata?: Record<string, unknown>
+) {
+  try {
+    const guard = await prisma.carGuard.findUnique({
+      where: { id: guardInternalId },
+      select: { userId: true, pushToken: true },
+    })
+    if (!guard) {
+      console.warn(`⚠️ notifyGuard: guard ${guardInternalId} not found — skipping`)
+      return
+    }
+
+    const notificationId = `NOTIF-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+
+    const eventAt = new Date().toISOString()
+
+    await prisma.notification.create({
+      data: {
+        userId: guard.userId,
+        guardId: guardInternalId,
+        notificationId,
+        type,
+        channel: 'PUSH',
+        title,
+        message,
+        status: 'SENT',
+        metadata: { eventAt, ...(metadata ?? {}) } as any,
+      },
+    })
+
+    console.log(`🔔 Notification saved: [${type}] for guard ${guardInternalId}`)
+
+    if (guard.pushToken) {
+      await sendExpoPush(guard.pushToken, title, message, { type, ...metadata })
+    }
+  } catch (err) {
+    console.error(`❌ notifyGuard failed for ${guardInternalId}:`, err)
+  }
+}

@@ -1,43 +1,60 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
-import { sendExpoPush } from '../lib/expoPush'
+import { notifyGuard } from '../lib/notifications'
+import { adminAuth } from '../middleware/adminAuth'
 
 const router = Router()
 
-// ─── Helper: create a notification record + send push ───────────────────────
-async function notifyGuard(
-  guardInternalId: string,
-  type: string,
-  title: string,
-  message: string,
-  metadata?: Record<string, unknown>
-) {
-  const guard = await prisma.carGuard.findUnique({
-    where: { id: guardInternalId },
-    select: { userId: true, pushToken: true },
-  })
-  if (!guard) return
+// ─── Guard listing ───────────────────────────────────────────────────────────
 
-  const notificationId = `NOTIF-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+/**
+ * GET /api/admin/guards
+ * List guards with optional filters (status, search, limit, page)
+ */
+router.get('/guards', async (req: Request, res: Response) => {
+  try {
+    const { status, search, limit = '100', page = '1' } = req.query
+    const take = parseInt(limit as string)
+    const skip = (parseInt(page as string) - 1) * take
 
-  await prisma.notification.create({
-    data: {
-      userId: guard.userId,
-      guardId: guardInternalId,
-      notificationId,
-      type,
-      channel: 'PUSH',
-      title,
-      message,
-      status: 'SENT',
-      metadata: metadata ? (metadata as any) : null,
-    },
-  })
+    const where: any = {}
+    if (status && status !== 'all') where.status = String(status).toUpperCase()
+    if (search) {
+      const s = String(search)
+      where.OR = [
+        { name: { contains: s, mode: 'insensitive' } },
+        { surname: { contains: s, mode: 'insensitive' } },
+        { guardId: { contains: s, mode: 'insensitive' } },
+        { phone: { contains: s, mode: 'insensitive' } },
+      ]
+    }
 
-  if (guard.pushToken) {
-    await sendExpoPush(guard.pushToken, title, message, { type, ...metadata })
+    const [guards, total] = await Promise.all([
+      prisma.carGuard.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        take,
+        skip,
+        select: {
+          id: true,
+          guardId: true,
+          name: true,
+          surname: true,
+          phone: true,
+          status: true,
+          balance: true,
+          location: { select: { name: true, city: true } },
+        },
+      }),
+      prisma.carGuard.count({ where }),
+    ])
+
+    return res.json({ success: true, data: { guards, total } })
+  } catch (error) {
+    console.error('❌ Error fetching guards:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch guards' })
   }
-}
+})
 
 // ─── Payout admin endpoints ──────────────────────────────────────────────────
 
@@ -108,7 +125,7 @@ router.get('/payout-requests', async (req: Request, res: Response) => {
  * POST /api/admin/payout-requests/:id/approve
  * Approve a payout — deduct from guard balance, notify guard
  */
-router.post('/payout-requests/:id/approve', async (req: Request, res: Response) => {
+router.post('/payout-requests/:id/approve', adminAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { adminId, adminNotes } = req.body
@@ -223,9 +240,9 @@ router.post('/payout-requests/:id/reject', async (req: Request, res: Response) =
 
 /**
  * POST /api/admin/payout-requests/:id/ewallet-sent
- * Mark payout as completed/sent — notify guard to check their messages
+ * Mark payout as completed — eWallet method (legacy + default)
  */
-router.post('/payout-requests/:id/ewallet-sent', async (req: Request, res: Response) => {
+router.post('/payout-requests/:id/ewallet-sent', adminAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { adminId, notes } = req.body
@@ -255,13 +272,64 @@ router.post('/payout-requests/:id/ewallet-sent', async (req: Request, res: Respo
       'PAYOUT_SENT',
       'Payment Sent',
       `Your payout of R${payout.amount.toFixed(2)} has been sent. Check your messages.`,
-      { payoutId: payout.payoutId || id, amount: payout.amount }
+      { payoutId: payout.payoutId || id, amount: payout.amount, method: 'VOUCHER' }
     )
 
-    console.log('✅ Payout marked as sent:', id, 'Guard:', payout.guard.guardId)
+    console.log('✅ Payout (eWallet) marked as sent:', id, 'Guard:', payout.guard.guardId)
     return res.json({ success: true, message: 'Payout marked as sent' })
   } catch (error) {
     console.error('❌ Error marking payout as sent:', error)
+    return res.status(500).json({ success: false, error: 'Failed to update payout' })
+  }
+})
+
+/**
+ * POST /api/admin/payout-requests/:id/bank-transfer-sent
+ * Mark payout as completed — bank transfer method
+ */
+router.post('/payout-requests/:id/bank-transfer-sent', adminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { adminId, reference } = req.body
+
+    const payout = await prisma.payout.findUnique({
+      where: { id },
+      include: { guard: { select: { id: true, guardId: true } } },
+    })
+
+    if (!payout) return res.status(404).json({ success: false, error: 'Payout request not found' })
+    if (!['APPROVED', 'PROCESSING'].includes(payout.status)) {
+      return res.status(400).json({ success: false, error: `Cannot mark as sent a payout with status: ${payout.status}` })
+    }
+
+    await prisma.payout.update({
+      where: { id },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        // Keep the existing note when no EFT reference is supplied. This read
+        // `reference || null`, so completing a transfer without typing one
+        // erased whatever the approver had written. The ewallet handler next
+        // door already preserves it.
+        adminNotes: reference
+          ? (payout.adminNotes ? `${payout.adminNotes} | Ref: ${reference}` : `Ref: ${reference}`)
+          : payout.adminNotes,
+        approvedBy: adminId || payout.approvedBy,
+      },
+    })
+
+    await notifyGuard(
+      payout.guard.id,
+      'PAYOUT_SENT',
+      'Bank Transfer Processed',
+      `Your payout of R${payout.amount.toFixed(2)} has been processed. Funds will reflect in your bank account within 1–2 business days.`,
+      { payoutId: payout.payoutId || id, amount: payout.amount, method: 'BANK_TRANSFER', reference: reference || null }
+    )
+
+    console.log('✅ Payout (bank transfer) marked as sent:', id, 'Guard:', payout.guard.guardId)
+    return res.json({ success: true, message: 'Bank transfer confirmed' })
+  } catch (error) {
+    console.error('❌ Error confirming bank transfer:', error)
     return res.status(500).json({ success: false, error: 'Failed to update payout' })
   }
 })
@@ -444,6 +512,121 @@ router.post('/registration/:id/reject', async (req: Request, res: Response) => {
       error: 'Internal server error',
       details: error instanceof Error ? error.message : 'Unknown error'
     })
+  }
+})
+
+/**
+ * POST /api/admin/tips/manual
+ * Manually record a tip that Netcash processed but the webhook missed.
+ * Body: { guardId, amount, reference?, netcashRef?, adminNote? }
+ */
+router.post('/tips/manual', adminAuth, async (req: Request, res: Response) => {
+  try {
+    const { guardId, amount, reference, netcashRef, adminNote } = req.body
+
+    if (!guardId || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      return res.status(400).json({ success: false, error: 'guardId and a positive amount are required' })
+    }
+
+    const guard = await prisma.carGuard.findUnique({ where: { guardId } })
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    const ref = netcashRef || reference || null
+
+    // Idempotency — don't double-process the same Netcash reference
+    if (ref) {
+      const existing = await prisma.transaction.findFirst({ where: { reference: ref } })
+      if (existing) {
+        return res.status(409).json({ success: false, error: `Already processed: ${ref}` })
+      }
+    }
+
+    const parsedAmount = parseFloat(amount)
+
+    const commissionSetting = await prisma.commissionSetting.findFirst({
+      where: { isActive: true, OR: [{ appliesTo: 'TIPS' }, { appliesTo: 'ALL' }] },
+    })
+    const commissionRate   = commissionSetting?.percentage ?? 0
+    const commissionAmount = parsedAmount * (commissionRate / 100)
+    const guardReceives    = parsedAmount - commissionAmount
+
+    const result = await prisma.$transaction(async tx => {
+      const updatedGuard = await tx.carGuard.update({
+        where: { id: guard.id },
+        data: {
+          balance:          { increment: guardReceives },
+          lifetimeEarnings: { increment: guardReceives },
+        },
+      })
+
+      const tip = await tx.tip.create({
+        data: {
+          guardId:    guard.id,
+          // No customer: this is an admin backfill, not a payment by a person
+          // with an account. It wrote the string 'manual-backfill' into an
+          // ObjectId column, which rolled the whole transaction back and made
+          // this endpoint fail every single time it was called.
+          locationId: guard.locationId,
+          amount:     guardReceives,
+        },
+      })
+
+      const txRecord = await tx.transaction.create({
+        data: {
+          guardId:     guard.id,
+          type:        'TIP',
+          amount:      guardReceives,
+          status:      'COMPLETED',
+          description: adminNote ? `Manual tip: ${adminNote}` : 'Tip (manual entry — Netcash webhook missed)',
+          reference:   ref,
+          balance:     updatedGuard.balance,
+          metadata:    { source: 'manual_backfill', netcashRef: ref } as any,
+        },
+      })
+
+      if (commissionAmount > 0) {
+        // Bind to the row just created. This re-queried for the newest
+        // transaction matching `reference`, and when `ref` was null the
+        // filter dropped out entirely, so the commission could attach to an
+        // unrelated earlier transaction for the same guard.
+        await tx.commission.create({
+          data: {
+            guardId:        guard.id,
+            transactionId:  txRecord.id,
+            amount:         commissionAmount,
+            rate:           commissionRate,
+            originalAmount: parsedAmount,
+            guardReceives,
+            type:           'TIP',
+          },
+        })
+      }
+
+      return updatedGuard
+    })
+
+    // Outside the transaction on purpose. notifyGuard sends an Expo push over
+    // HTTP using the non-transactional client; inside, a slow push ate the 5s
+    // transaction timeout and rolled the credit back while the push and the
+    // notification row survived. The guard was told about money they had not
+    // been given.
+    await notifyGuard(
+      guard.id,
+      'TIP_RECEIVED',
+      'Tip credited',
+      `R${guardReceives.toFixed(2)} has been added to your balance.`,
+      { amount: guardReceives, newBalance: result.balance, source: 'backfill' }
+    ).catch(err => console.error('⚠️ Manual tip credited but push failed:', err))
+
+    console.log(`✅ Manual tip recorded: guard=${guardId} amount=${guardReceives} ref=${ref}`)
+    return res.json({
+      success:  true,
+      message:  `R${guardReceives.toFixed(2)} credited to ${guard.name} ${guard.surname}`,
+      data:     { guardId, original: parsedAmount, commissionAmount, guardReceives, reference: ref },
+    })
+  } catch (error) {
+    console.error('❌ Error recording manual tip:', error)
+    return res.status(500).json({ success: false, error: 'Failed to record tip' })
   }
 })
 

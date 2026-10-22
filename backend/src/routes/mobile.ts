@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
 import { mobileAuth } from '../middleware/mobileAuth'
+import { loadTipActivity, channelOf, CHANNEL_LABEL, isMisreadFailure, sast, tipLinkFor } from '../lib/tipActivity'
 
 const router = Router()
 
@@ -925,7 +926,10 @@ router.get('/mobile/me', mobileAuth, async (req: Request, res: Response) => {
         status: guard.status,
         rating: guard.rating,
         qrCode: guard.qrCode,
+        // Manual QR: the Netcash code uploaded for this CTA (their original lanyard).
         qrCodeUrl: guard.qrCodeUrl || null,
+        // Auto QR: the Tippa link printed on new lanyards. Every scan is tracked.
+        tipLink: tipLinkFor(guard.guardId),
         location: guard.location || null,
         bankName: guard.bankName,
         accountNumber: guard.accountNumber,
@@ -959,26 +963,127 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
       skip: parseInt(offset as string),
     })
 
+    const total = await prisma.transaction.count({ where })
+
+    // Which QR each tip came through. Tips from Tippa QR scans are matched to their
+    // attempt (same rules as the admin server), so even a tip that only arrived later
+    // through the Netcash statement is labelled Tippa QR when that is where it began.
+    const oldest = transactions.length ? transactions[transactions.length - 1].createdAt : new Date()
+    const me = await prisma.carGuard.findUnique({ where: { id: guardId }, select: { guardId: true } })
+    let tippaTipIds = new Set<string>()
+    if (me) {
+      try {
+        ;({ tippaTipIds } = await loadTipActivity(guardId, me.guardId, new Date(oldest.getTime() - 7 * 86400000)))
+      } catch (e) {
+        console.warn('tip activity unavailable for transaction labels:', (e as Error).message)
+      }
+    }
+
     return res.json({
       success: true,
       data: {
-        transactions: transactions.map(t => ({
-          id: t.id,
-          type: t.type,
-          amount: t.amount,
-          description: t.description,
-          status: t.status || 'COMPLETED',
-          reference: t.reference,
-          balance: t.balance,
-          date: t.createdAt.toISOString().split('T')[0],
-          time: t.createdAt.toISOString().split('T')[1].split('.')[0],
-          createdAt: t.createdAt.toISOString(),
-        }))
+        transactions: transactions.map(t => {
+          const meta = (t.metadata as Record<string, any>) ?? {}
+          let status = t.status || 'COMPLETED'
+          const when = sast(t.createdAt) // South African time, not the server's UTC
+          const row: Record<string, unknown> = {
+            id: t.id,
+            type: t.type,
+            amount: t.amount,
+            description: t.description,
+            status,
+            reference: t.reference,
+            balance: t.balance,
+            date: when.date,
+            time: when.time,
+            createdAt: t.createdAt.toISOString(),
+            metadata: meta,
+          }
+          if (t.type === 'TIP') {
+            const channel = channelOf(t, tippaTipIds)
+            row.channel = channel
+            row.channelLabel = CHANNEL_LABEL[channel]
+          }
+          // The old admin code saved every Netcash reply as failed, whatever happened.
+          // These are not real failures: say so instead of showing "failed".
+          if (isMisreadFailure(t)) {
+            status = 'UNCONFIRMED'
+            row.status = status
+            // The same old code also divided the amount by 100 (R5.00 was saved as R0.05).
+            row.amount = +(t.amount * 100).toFixed(2)
+            row.explanation = 'Netcash replied, but our old system misread the reply. This is not a confirmed failure. If the money was paid, it is added from the Netcash statement as a separate tip.'
+          } else if (status === 'FAILED' || status === 'REVERSED') {
+            const why = String(t.failureReason || meta.failureReason || '').replace(/^Netcash did not accept the payment:?\s*/i, '')
+            row.failureReason = why || 'The payment did not go through'
+            row.explanation = `${why ? `The payment did not go through: ${why}.` : 'The payment did not go through.'} No money was taken from the customer and nothing was added to your balance.`
+            row.paymentMethod = (meta.paymentMethod as string) || null
+          } else if (t.type === 'TIP' && status === 'COMPLETED') {
+            const fee = Number(meta.commissionAmount || 0)
+            row.explanation = fee > 0
+              ? `Customer tipped R${Number(meta.originalAmount ?? t.amount + fee).toFixed(2)}. R${fee.toFixed(2)} fee, R${t.amount.toFixed(2)} added to your balance.`
+              : `R${t.amount.toFixed(2)} added to your balance.`
+          }
+          return row
+        }),
+        pagination: {
+          total,
+          limit: parseInt(limit as string),
+          offset: parseInt(offset as string),
+          hasMore: parseInt(offset as string) + transactions.length < total,
+        },
       }
     })
   } catch (error) {
     console.error('❌ Error fetching transactions:', error)
     return res.status(500).json({ success: false, error: 'Failed to fetch transactions' })
+  }
+})
+
+/**
+ * GET /api/mobile/me/tip-activity?days=30
+ * Every Tippa QR tip attempt for the logged-in CTA: completed, waiting, failed, not
+ * finished or left, each with a plain explanation and its steps. Also totals per QR
+ * (Tippa QR and Netcash QR) so the CTA sees both lanyards side by side.
+ */
+router.get('/mobile/me/tip-activity', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+    const days = Math.min(90, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30))
+    const since = new Date(Date.now() - days * 86400000)
+    const me = await prisma.carGuard.findUnique({ where: { id: guardId }, select: { guardId: true, qrCodeUrl: true } })
+    if (!me) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    const { attempts, tips, tippaTipIds } = await loadTipActivity(guardId, me.guardId, since)
+
+    const completedTips = tips.filter(t => t.status === 'COMPLETED')
+    const byChannel = { TIPPA_QR: { count: 0, received: 0 }, NETCASH_QR: { count: 0, received: 0 }, OTHER: { count: 0, received: 0 } }
+    for (const t of completedTips) {
+      const c = byChannel[channelOf(t, tippaTipIds)]
+      c.count++
+      c.received += Number(t.amount || 0)
+    }
+    const count = (s: string) => attempts.filter(a => a.status === s).length
+
+    return res.json({
+      success: true,
+      data: {
+        days,
+        tipLink: tipLinkFor(me.guardId),
+        hasNetcashQr: !!me.qrCodeUrl,
+        summary: {
+          attempts: attempts.length,
+          paid: count('SUCCESS'),
+          waiting: count('PENDING') + count('IN_PROGRESS'),
+          notCompleted: count('FAILED') + count('INCOMPLETE') + count('ABANDONED'),
+          failed: count('FAILED'),
+        },
+        byChannel: Object.fromEntries(Object.entries(byChannel).map(([k, v]) => [k, { count: v.count, received: +v.received.toFixed(2) }])),
+        attempts: attempts.slice(0, 100),
+      },
+    })
+  } catch (error) {
+    console.error('❌ Error fetching tip activity:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch tip activity' })
   }
 })
 
@@ -1029,24 +1134,30 @@ router.get('/mobile/me/payouts', mobileAuth, async (req: Request, res: Response)
  */
 router.post('/mobile/me/payout/request', mobileAuth, async (req: Request, res: Response) => {
   try {
-    const { amount, notes } = req.body
+    const { amount, notes, method } = req.body
     const guardId = req.guard!.guardId
 
     if (!amount) return res.status(400).json({ success: false, error: 'Amount is required' })
     if (amount < 10) return res.status(400).json({ success: false, error: 'Minimum payout amount is R10' })
     if (amount % 10 !== 0) return res.status(400).json({ success: false, error: 'Payout amount must be a multiple of R10' })
 
+    const resolvedMethod = method === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'VOUCHER'
+
     const guard = await prisma.carGuard.findUnique({ where: { id: guardId } })
     if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
     if (guard.status !== 'ACTIVE') return res.status(400).json({ success: false, error: 'Guard account is not active' })
     if (guard.balance < amount) return res.status(400).json({ success: false, error: 'Insufficient balance', currentBalance: guard.balance })
+
+    if (resolvedMethod === 'BANK_TRANSFER' && !guard.accountNumber) {
+      return res.status(400).json({ success: false, error: 'No banking details on file. Please add your bank account in your profile before requesting a bank transfer.' })
+    }
 
     const existing = await prisma.payout.findFirst({ where: { guardId, status: 'PENDING' } })
     if (existing) return res.status(400).json({ success: false, error: 'You already have a pending payout request. Please wait for it to be processed.' })
 
     const payoutId = `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
     const payout = await prisma.payout.create({
-      data: { payoutId, guardId, amount, status: 'PENDING', notes: notes || null }
+      data: { payoutId, guardId, amount, status: 'PENDING', method: resolvedMethod as any, notes: notes || null }
     })
 
     return res.status(201).json({
@@ -1056,6 +1167,7 @@ router.post('/mobile/me/payout/request', mobileAuth, async (req: Request, res: R
         payoutId: payout.payoutId,
         amount: payout.amount,
         status: payout.status,
+        method: payout.method,
         requestedAt: payout.createdAt.toISOString(),
         currentBalance: guard.balance,
         note: 'Your request is pending admin approval. Balance will be deducted upon approval.'
@@ -1140,26 +1252,167 @@ router.post('/mobile/me/push-token', mobileAuth, async (req: Request, res: Respo
 })
 
 /**
+ * POST /api/mobile/me/notifications/backfill
+ * One-time backfill: creates TIP_RECEIVED notifications for past tip transactions
+ * that don't already have a notification record.
+ */
+router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+
+    const guard = await prisma.carGuard.findUnique({
+      where: { id: guardId },
+      select: { userId: true },
+    })
+    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    // Get the last 50 TIP transactions for this guard
+    const txs = await prisma.transaction.findMany({
+      where: { guardId, type: 'TIP' },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+
+    if (txs.length === 0) return res.json({ success: true, created: 0 })
+
+    // Also get payouts that have been actioned (not just pending)
+    const payouts = await prisma.payout.findMany({
+      where: { guardId, status: { in: ['APPROVED', 'PROCESSING', 'COMPLETED', 'REJECTED'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+
+    let created = 0
+
+    for (const tx of txs) {
+      const notifId = `NOTIF-TIP-${tx.id}`
+      const eventAt = tx.createdAt.toISOString()
+      try {
+        await prisma.notification.upsert({
+          where: { notificationId: notifId },
+          create: {
+            userId: guard.userId,
+            guardId,
+            notificationId: notifId,
+            type: 'TIP_RECEIVED',
+            channel: 'PUSH',
+            title: 'Tip received',
+            message: `R${tx.amount.toFixed(2)} was added to your balance`,
+            status: 'SENT',
+            createdAt: tx.createdAt,
+            metadata: { amount: tx.amount, transactionId: tx.id, eventAt, backfilled: true } as any,
+          },
+          update: {
+            createdAt: tx.createdAt,
+            metadata: { amount: tx.amount, transactionId: tx.id, eventAt, backfilled: true } as any,
+          },
+        })
+        created++
+      } catch {
+        // Skip on error
+      }
+    }
+
+    for (const payout of payouts) {
+      const pid = payout.payoutId || payout.id
+      let type: string
+      let title: string
+      let message: string
+      const eventDate = payout.updatedAt ?? payout.createdAt
+
+      if (payout.status === 'REJECTED') {
+        type = 'PAYOUT_REJECTED'
+        title = 'Payout rejected'
+        message = `Your R${payout.amount.toFixed(2)} payout request was rejected.${payout.rejectionReason ? ' Reason: ' + payout.rejectionReason : ''}`
+      } else if (payout.status === 'COMPLETED') {
+        type = 'PAYOUT_SENT'
+        title = 'Payout sent!'
+        message = `R${payout.amount.toFixed(2)} has been sent to your bank account.`
+      } else {
+        type = 'PAYOUT_APPROVED'
+        title = 'Payout approved'
+        message = `Your R${payout.amount.toFixed(2)} payout request has been approved and is being processed.`
+      }
+
+      const notifId = `NOTIF-PAYOUT-${payout.status}-${pid}`
+      const eventAt = eventDate.toISOString()
+      try {
+        await prisma.notification.upsert({
+          where: { notificationId: notifId },
+          create: {
+            userId: guard.userId,
+            guardId,
+            notificationId: notifId,
+            type,
+            channel: 'PUSH',
+            title,
+            message,
+            status: 'SENT',
+            createdAt: eventDate,
+            metadata: { amount: payout.amount, payoutId: pid, status: payout.status, eventAt, backfilled: true } as any,
+          },
+          update: {
+            createdAt: eventDate,
+            metadata: { amount: payout.amount, payoutId: pid, status: payout.status, eventAt, backfilled: true } as any,
+          },
+        })
+        created++
+      } catch {
+        // Skip on error
+      }
+    }
+
+    console.log(`🔄 Backfilled ${created} notifications (tips + payouts) for guard ${guardId}`)
+    return res.json({ success: true, created })
+  } catch (err) {
+    console.error('❌ Backfill error:', err)
+    return res.status(500).json({ success: false, error: 'Backfill failed' })
+  }
+})
+
+/**
+ * POST /api/mobile/me/notifications/test
+ * Create a test notification for the logged-in guard (dev only)
+ */
+router.post('/mobile/me/notifications/test', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+    const { notifyGuard } = await import('../lib/notifications')
+    await notifyGuard(guardId, 'TIP_RECEIVED', 'Test notification', 'This is a test — notifications are working!', { test: true })
+    return res.json({ success: true, message: 'Test notification created' })
+  } catch (error) {
+    console.error('❌ Test notification error:', error)
+    return res.status(500).json({ success: false, error: String(error) })
+  }
+})
+
+/**
  * GET /api/mobile/me/notifications
  * Get the logged-in guard's notifications (newest first)
  */
 router.get('/mobile/me/notifications', mobileAuth, async (req: Request, res: Response) => {
   try {
     const guardId = req.guard!.guardId
-    const { limit = '30' } = req.query
+    const { limit = '100' } = req.query
 
+    // Fetch the guard's userId for fallback (notifications created before guardId was stored)
     const guard = await prisma.carGuard.findUnique({
       where: { id: guardId },
       select: { userId: true },
     })
 
-    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
-
     const notifications = await prisma.notification.findMany({
-      where: { userId: guard.userId },
+      where: {
+        OR: [
+          { guardId },
+          ...(guard ? [{ userId: guard.userId, guardId: null }] : []),
+        ],
+      },
       orderBy: { createdAt: 'desc' },
       take: parseInt(limit as string),
     })
+
+    console.log(`📬 Notifications for guard ${guardId}: ${notifications.length} found`)
 
     const unreadCount = notifications.filter(n => !n.readAt).length
 
@@ -1192,15 +1445,23 @@ router.post('/mobile/me/notifications/read-all', mobileAuth, async (req: Request
   try {
     const guardId = req.guard!.guardId
 
+    // Must match the OR in GET /mobile/me/notifications. This matched only
+    // { guardId }, while the list also returns legacy rows keyed on userId
+    // with a null guardId, so those could never be cleared and the unread
+    // badge came back on every poll.
     const guard = await prisma.carGuard.findUnique({
       where: { id: guardId },
       select: { userId: true },
     })
 
-    if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
-
     await prisma.notification.updateMany({
-      where: { userId: guard.userId, readAt: null },
+      where: {
+        readAt: null,
+        OR: [
+          { guardId },
+          ...(guard ? [{ userId: guard.userId, guardId: null }] : []),
+        ],
+      },
       data: { readAt: new Date() },
     })
 

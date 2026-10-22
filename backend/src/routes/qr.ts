@@ -50,8 +50,8 @@ router.get('/:guardId', async (req: Request, res: Response) => {
       p3: `Tip for ${guard.name} ${guard.surname}`,
       p4: '20.00', // Default R20 tip
       m4: '',
-      m5: `${process.env.BASE_URL || 'http://localhost:3001'}/api/payments/return`,
-      m6: `${process.env.BASE_URL || 'http://localhost:3001'}/api/payments/notify`,
+      m5: `${process.env.BASE_URL || 'http://localhost:3001'}/api/payments/netcash/accept`,
+      m6: `${process.env.BASE_URL || 'http://localhost:3001'}/api/webhooks/netcash`,
       m10: testMode,
       Budget: 'Y'
     }

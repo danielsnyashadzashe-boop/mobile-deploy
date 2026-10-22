@@ -15,7 +15,10 @@ export interface GuardData {
   status: string;
   rating?: number;
   qrCode: string | null;
+  /** Manual QR: the Netcash code uploaded for this CTA (original lanyard). */
   qrCodeUrl: string | null;
+  /** Auto QR: the Tippa link printed on new lanyards; every scan is tracked. */
+  tipLink?: string | null;
   location?: { id: string; name: string; address: string } | null;
   bankName?: string | null;
   accountNumber?: string | null;

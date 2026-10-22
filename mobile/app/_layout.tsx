@@ -60,14 +60,11 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" />
               <Stack.Screen
                 name="notifications"
-                options={{
-                  headerShown: true,
-                  title: 'Notifications',
-                  headerStyle: { backgroundColor: '#5B94D3' },
-                  headerTintColor: '#fff',
-                  headerTitleStyle: { fontFamily: 'Nunito-Bold', fontSize: 18 },
-                  presentation: 'card',
-                }}
+                options={{ headerShown: false, presentation: 'card' }}
+              />
+              <Stack.Screen
+                name="tip-activity"
+                options={{ headerShown: false, presentation: 'card' }}
               />
             </Stack>
           </SafeAreaProvider>

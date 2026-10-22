@@ -80,7 +80,7 @@ export default function SignInScreen() {
         type = 'info';
       } else if (raw.includes('Invalid phone') || raw.includes('Invalid phone number or access code')) {
         title = 'Incorrect Details';
-        message = 'The phone number or access code you entered is incorrect. Please double-check and try again. Each access code can only be used once.';
+        message = 'The phone number or access code you entered is incorrect. Please double-check and try again.';
         type = 'error';
       } else if (raw.includes('not active') || raw.includes('inactive') || raw.includes('suspended')) {
         title = 'Account Inactive';
@@ -112,7 +112,7 @@ export default function SignInScreen() {
             <TippaLogo size={220} />
           </View>
           <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Sign in to Tippa CarGuard</Text>
+          <Text style={styles.subtitle}>Tippa Payment Solutions</Text>
         </LinearGradient>
 
         <View style={styles.formContainer}>
@@ -182,7 +182,7 @@ export default function SignInScreen() {
               <View style={styles.infoBox}>
                 <Ionicons name="key-outline" size={18} color="#2563EB" />
                 <Text style={styles.infoText}>
-                  Your access code is provided by your manager when your account is set up. Each code can only be used once.
+                  Your access code is provided by your manager when your account is set up. You can use it to sign in on any device.
                 </Text>
               </View>
 

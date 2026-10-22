@@ -2,9 +2,9 @@
   "expo": {
     "name": "Tippa Mobile Solutions",
     "slug": "tippa-carguard",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/icons8-phone-64.png",
     "scheme": "tippa",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -21,7 +21,7 @@
       "package": "com.nogada.tippa.carguard",
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon.png",
+        "foregroundImage": "./assets/images/icons8-phone-64.png",
         "backgroundColor": "#10B981"
       }
     },
@@ -35,8 +35,18 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
+          "icon": "./assets/images/icons8-phone-64.png",
           "color": "#5B94D3"
+        }
+      ],
+      "expo-video",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
         }
       ]
     ],

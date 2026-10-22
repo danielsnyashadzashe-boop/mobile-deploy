@@ -664,8 +664,9 @@ export const mockLocations: Location[] = [
 ];
 
 // Helper functions
-export const formatCurrency = (amount: number): string => {
-  return `R ${amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+export const formatCurrency = (amount: number | null | undefined): string => {
+  const n = amount ?? 0;
+  return `R ${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 };
 
 export const formatDate = (date: string): string => {

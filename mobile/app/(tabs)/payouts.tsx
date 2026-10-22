@@ -13,24 +13,39 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { formatCurrency } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
-import { requestPayout, getPayoutRequests, getAutoPayoutSettings, PayoutRequest, AutoPayoutSettings } from '../../services/mobileApiService';
+import { submitPayoutRequest, getMyPayouts, getAutoPayoutSettings, PayoutRequest, AutoPayoutSettings } from '../../services/mobileApiService';
 import { useAuth } from '../../contexts/AuthContext';
 import { AlertModal } from '../../components/AlertModal';
 
 const MIN_PAYOUT = 10;
 const QUICK_AMOUNTS = [10, 20, 50, 100, 200, 500];
 
+type PayoutMethod = 'VOUCHER' | 'BANK_TRANSFER';
 type AlertType = 'error' | 'success' | 'info' | 'warning';
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
-  PENDING:    { label: 'Pending — awaiting admin review',    color: '#D97706', bg: '#FEF3C7', icon: 'time-outline' },
-  APPROVED:   { label: 'Approved — eWallet being prepared',  color: '#2563EB', bg: '#DBEAFE', icon: 'checkmark-circle-outline' },
-  PROCESSING: { label: 'Processing',                         color: '#2563EB', bg: '#DBEAFE', icon: 'sync-outline' },
-  COMPLETED:  { label: 'eWallet Sent',                       color: '#059669', bg: '#D1FAE5', icon: 'checkmark-done-outline' },
-  REJECTED:   { label: 'Declined',                           color: '#DC2626', bg: '#FEE2E2', icon: 'close-circle-outline' },
-  CANCELLED:  { label: 'Declined',                           color: '#DC2626', bg: '#FEE2E2', icon: 'close-circle-outline' },
-  FAILED:     { label: 'Could not be sent — balance refunded', color: '#EA580C', bg: '#FFF7ED', icon: 'alert-circle-outline' },
-};
+function methodLabel(m?: string | null) {
+  return m === 'BANK_TRANSFER' ? 'Bank Transfer' : 'eWallet';
+}
+
+function getStatusConfig(status: string, method?: string | null) {
+  const isBankTransfer = method === 'BANK_TRANSFER';
+  const configs: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+    PENDING:    { label: 'Pending — awaiting admin review',    color: '#D97706', bg: '#FEF3C7', icon: 'time-outline' },
+    APPROVED:   {
+      label: isBankTransfer ? 'Approved — bank transfer pending' : 'Approved — eWallet being prepared',
+      color: '#2563EB', bg: '#DBEAFE', icon: 'checkmark-circle-outline',
+    },
+    PROCESSING: { label: 'Processing',                         color: '#2563EB', bg: '#DBEAFE', icon: 'sync-outline' },
+    COMPLETED:  {
+      label: isBankTransfer ? 'Bank Transfer Sent' : 'eWallet Sent',
+      color: '#059669', bg: '#D1FAE5', icon: 'checkmark-done-outline',
+    },
+    REJECTED:   { label: 'Declined',                           color: '#DC2626', bg: '#FEE2E2', icon: 'close-circle-outline' },
+    CANCELLED:  { label: 'Declined',                           color: '#DC2626', bg: '#FEE2E2', icon: 'close-circle-outline' },
+    FAILED:     { label: 'Could not be sent — balance refunded', color: '#EA580C', bg: '#FFF7ED', icon: 'alert-circle-outline' },
+  };
+  return configs[status] ?? configs['PENDING'];
+}
 
 export default function PayoutsScreen() {
   const { guard: authGuard, token } = useAuth();
@@ -45,6 +60,7 @@ export default function PayoutsScreen() {
   // Request form state
   const [amount, setAmount]           = useState('');
   const [notes, setNotes]             = useState('');
+  const [method, setMethod]           = useState<PayoutMethod>('VOUCHER');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showForm, setShowForm]       = useState(false);
 
@@ -58,20 +74,22 @@ export default function PayoutsScreen() {
 
   const balance = guardData?.balance ?? 0;
 
+  const hasBankingDetails = !!(guardData?.accountNumber);
+
   // ─── Load requests ────────────────────────────────────────────────────────
   const loadRequests = useCallback(async () => {
-    if (!authGuard?.guardPublicId) return;
+    if (!token) return;
     try {
       const [payoutsRes, autoRes] = await Promise.all([
-        getPayoutRequests(authGuard.guardPublicId),
-        token ? getAutoPayoutSettings(token) : Promise.resolve({ success: false }),
+        getMyPayouts(token),
+        getAutoPayoutSettings(token),
       ]);
       if (payoutsRes.success && payoutsRes.data) setRequests(payoutsRes.data);
       if (autoRes.success && autoRes.data) setAutoPayoutSettings(autoRes.data);
     } catch (e) {
       console.error('loadRequests error:', e);
     }
-  }, [authGuard?.guardPublicId, token]);
+  }, [token]);
 
   useEffect(() => {
     if (!guardLoading && guardData) {
@@ -88,9 +106,16 @@ export default function PayoutsScreen() {
     setRefreshing(false);
   }, [loadRequests]);
 
+  // Reset method to eWallet whenever form closes
+  const closeForm = () => {
+    setShowForm(false);
+    setAmount('');
+    setNotes('');
+    setMethod('VOUCHER');
+  };
+
   // ─── Validation ───────────────────────────────────────────────────────────
   const parsedAmount = parseFloat(amount) || 0;
-
   const maxWithdrawable = Math.floor(balance / 10) * 10;
 
   const getAmountError = (): string | null => {
@@ -112,12 +137,11 @@ export default function PayoutsScreen() {
 
   const amountError = getAmountError();
   const canSubmit   = parsedAmount >= MIN_PAYOUT && parsedAmount <= balance && parsedAmount % 10 === 0 && !isSubmitting;
-
-  const hasPending = requests.some(r => r.status === 'PENDING' || r.status === 'PROCESSING');
+  const hasPending  = requests.some(r => r.status === 'PENDING' || r.status === 'PROCESSING');
 
   // ─── Submit ───────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!authGuard?.guardPublicId || !canSubmit) return;
+    if (!token || !canSubmit) return;
 
     if (hasPending) {
       showModal('warning', 'Request Already Pending',
@@ -126,21 +150,21 @@ export default function PayoutsScreen() {
     }
 
     if (parsedAmount > balance) {
-      showModal('error', 'Insufficient Balance',
-        `You can only request up to ${formatCurrency(balance)}.`);
+      showModal('error', 'Insufficient Balance', `You can only request up to ${formatCurrency(balance)}.`);
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const res = await requestPayout(authGuard.guardPublicId, parsedAmount, notes.trim() || undefined);
+      const res = await submitPayoutRequest(parsedAmount, token, notes.trim() || undefined, method);
 
       if (res.success) {
+        const methodText = method === 'BANK_TRANSFER'
+          ? 'Bank transfer — funds will reflect within 1–2 business days once approved.'
+          : 'eWallet — you will receive an SMS once sent.';
         showModal('success', 'Request Submitted',
-          `Your payout request of ${formatCurrency(parsedAmount)} has been submitted and is pending admin approval. You will be notified once it is processed.`);
-        setAmount('');
-        setNotes('');
-        setShowForm(false);
+          `Your ${formatCurrency(parsedAmount)} payout request has been submitted. ${methodText}`);
+        closeForm();
         await loadRequests();
       } else {
         showModal('error', 'Request Failed', res.error || 'Failed to submit payout request. Please try again.');
@@ -181,7 +205,7 @@ export default function PayoutsScreen() {
         {/* ── Header ── */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Payouts</Text>
-          <Text style={styles.headerSub}>Request a bank transfer to your account</Text>
+          <Text style={styles.headerSub}>Request a payout to your eWallet or bank account</Text>
         </View>
 
         {/* ── Balance card ── */}
@@ -244,10 +268,7 @@ export default function PayoutsScreen() {
         {/* ── Request payout button / form ── */}
         {!showForm ? (
           <TouchableOpacity
-            style={[
-              styles.requestBtn,
-              (balance < MIN_PAYOUT || hasPending) && styles.requestBtnDisabled,
-            ]}
+            style={[styles.requestBtn, (balance < MIN_PAYOUT || hasPending) && styles.requestBtnDisabled]}
             onPress={() => {
               if (hasPending) {
                 showModal('warning', 'Request Already Pending',
@@ -267,9 +288,71 @@ export default function PayoutsScreen() {
         ) : (
           <View style={styles.formCard}>
             <View style={styles.formHeader}>
-              <Text style={styles.formTitle}>Request Bank Transfer</Text>
-              <TouchableOpacity onPress={() => { setShowForm(false); setAmount(''); setNotes(''); }}>
+              <Text style={styles.formTitle}>Request Payout</Text>
+              <TouchableOpacity onPress={closeForm}>
                 <Ionicons name="close" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* ── Method selection ── */}
+            <Text style={styles.fieldLabel}>How would you like to receive it?</Text>
+            <View style={styles.methodRow}>
+              {/* eWallet option */}
+              <TouchableOpacity
+                style={[styles.methodCard, method === 'VOUCHER' && styles.methodCardActive]}
+                onPress={() => setMethod('VOUCHER')}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.methodIcon, method === 'VOUCHER' && styles.methodIconActive]}>
+                  <Ionicons name="phone-portrait-outline" size={22} color={method === 'VOUCHER' ? '#fff' : '#5B94D3'} />
+                </View>
+                <Text style={[styles.methodTitle, method === 'VOUCHER' && styles.methodTitleActive]}>eWallet</Text>
+                <Text style={[styles.methodSub, method === 'VOUCHER' && styles.methodSubActive]}>Sent via SMS</Text>
+                {method === 'VOUCHER' && (
+                  <View style={styles.methodCheck}>
+                    <Ionicons name="checkmark-circle" size={16} color="#5B94D3" />
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Bank Transfer option */}
+              <TouchableOpacity
+                style={[
+                  styles.methodCard,
+                  method === 'BANK_TRANSFER' && styles.methodCardActive,
+                  !hasBankingDetails && styles.methodCardDisabled,
+                ]}
+                onPress={() => {
+                  if (!hasBankingDetails) {
+                    showModal('info', 'Banking Details Required',
+                      'Add your bank account details in the Profile tab to enable bank transfers.');
+                    return;
+                  }
+                  setMethod('BANK_TRANSFER');
+                }}
+                activeOpacity={hasBankingDetails ? 0.8 : 1}
+              >
+                <View style={[styles.methodIcon, method === 'BANK_TRANSFER' && styles.methodIconActive, !hasBankingDetails && styles.methodIconDisabled]}>
+                  <Ionicons name="business-outline" size={22} color={method === 'BANK_TRANSFER' ? '#fff' : hasBankingDetails ? '#5B94D3' : '#9CA3AF'} />
+                </View>
+                <Text style={[styles.methodTitle, method === 'BANK_TRANSFER' && styles.methodTitleActive, !hasBankingDetails && styles.methodTitleDisabled]}>
+                  Bank Transfer
+                </Text>
+                <Text style={[styles.methodSub, method === 'BANK_TRANSFER' && styles.methodSubActive, !hasBankingDetails && styles.methodSubDisabled]}>
+                  {hasBankingDetails
+                    ? `${guardData?.bankName ?? 'Bank'} · ••••${(guardData?.accountNumber ?? '').slice(-4)}`
+                    : 'Add details in Profile'}
+                </Text>
+                {method === 'BANK_TRANSFER' && (
+                  <View style={styles.methodCheck}>
+                    <Ionicons name="checkmark-circle" size={16} color="#5B94D3" />
+                  </View>
+                )}
+                {!hasBankingDetails && (
+                  <View style={styles.methodLock}>
+                    <Ionicons name="lock-closed-outline" size={12} color="#9CA3AF" />
+                  </View>
+                )}
               </TouchableOpacity>
             </View>
 
@@ -282,9 +365,7 @@ export default function PayoutsScreen() {
                   style={[styles.quickBtn, parsedAmount === a && styles.quickBtnActive]}
                   onPress={() => setAmount(String(a))}
                 >
-                  <Text style={[styles.quickBtnText, parsedAmount === a && styles.quickBtnTextActive]}>
-                    R{a}
-                  </Text>
+                  <Text style={[styles.quickBtnText, parsedAmount === a && styles.quickBtnTextActive]}>R{a}</Text>
                 </TouchableOpacity>
               ))}
               <TouchableOpacity
@@ -320,7 +401,9 @@ export default function PayoutsScreen() {
               <View style={styles.fieldSuccess}>
                 <Ionicons name="checkmark-circle-outline" size={14} color="#059669" />
                 <Text style={styles.fieldSuccessText}>
-                  {formatCurrency(parsedAmount)} will be sent to your registered bank account
+                  {method === 'BANK_TRANSFER'
+                    ? `${formatCurrency(parsedAmount)} will be transferred to your bank account`
+                    : `${formatCurrency(parsedAmount)} will be sent to your eWallet`}
                 </Text>
               </View>
             ) : null}
@@ -344,7 +427,9 @@ export default function PayoutsScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.infoTitle}>How payouts work</Text>
                 <Text style={styles.infoText}>
-                  Your request goes to the admin for approval. Once approved, the amount is transferred to your registered bank account. This typically takes 1–2 business days.
+                  {method === 'BANK_TRANSFER'
+                    ? 'Your request goes to admin for approval. Once approved, funds are manually transferred to your bank account. This typically takes 1–2 business days.'
+                    : 'Your request goes to admin for approval. Once approved, the amount is sent to your phone as an eWallet. You will receive an SMS confirmation.'}
                 </Text>
               </View>
             </View>
@@ -360,8 +445,10 @@ export default function PayoutsScreen() {
                 <ActivityIndicator color="#fff" />
               ) : (
                 <>
-                  <Ionicons name="send-outline" size={18} color="#fff" />
-                  <Text style={styles.submitBtnText}>Submit Request</Text>
+                  <Ionicons name={method === 'BANK_TRANSFER' ? 'business-outline' : 'phone-portrait-outline'} size={18} color="#fff" />
+                  <Text style={styles.submitBtnText}>
+                    {method === 'BANK_TRANSFER' ? 'Request Bank Transfer' : 'Request eWallet'}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
@@ -379,7 +466,7 @@ export default function PayoutsScreen() {
           </View>
         ) : (
           requests.map(req => {
-            const cfg = STATUS_CONFIG[req.status] ?? STATUS_CONFIG['PENDING'];
+            const cfg = getStatusConfig(req.status, req.method);
             return (
               <View key={req.id ?? req.payoutId} style={styles.requestCard}>
                 <View style={styles.requestRow}>
@@ -390,11 +477,24 @@ export default function PayoutsScreen() {
                   <Text style={styles.requestAmount}>{formatCurrency(req.amount)}</Text>
                 </View>
 
-                <Text style={styles.requestDate}>
-                  Requested: {new Date(req.requestedAt ?? req.createdAt ?? '').toLocaleDateString('en-ZA', {
-                    day: 'numeric', month: 'short', year: 'numeric'
-                  })}
-                </Text>
+                {/* Method badge */}
+                <View style={styles.methodBadgeRow}>
+                  <View style={[styles.methodBadge, req.method === 'BANK_TRANSFER' ? styles.methodBadgeBank : styles.methodBadgeEwallet]}>
+                    <Ionicons
+                      name={req.method === 'BANK_TRANSFER' ? 'business-outline' : 'phone-portrait-outline'}
+                      size={11}
+                      color={req.method === 'BANK_TRANSFER' ? '#059669' : '#2563EB'}
+                    />
+                    <Text style={[styles.methodBadgeText, req.method === 'BANK_TRANSFER' ? styles.methodBadgeTextBank : styles.methodBadgeTextEwallet]}>
+                      {methodLabel(req.method)}
+                    </Text>
+                  </View>
+                  <Text style={styles.requestDate}>
+                    {new Date(req.requestedAt ?? '').toLocaleDateString('en-ZA', {
+                      day: 'numeric', month: 'short', year: 'numeric',
+                    })}
+                  </Text>
+                </View>
 
                 {req.notes ? (
                   <Text style={styles.requestNotes}>Note: {req.notes}</Text>
@@ -420,7 +520,9 @@ export default function PayoutsScreen() {
                 {req.status === 'COMPLETED' && req.adminNotes ? (
                   <View style={styles.approvalBox}>
                     <Ionicons name="checkmark-circle-outline" size={14} color="#059669" />
-                    <Text style={styles.approvalText}>Ref: {req.adminNotes}</Text>
+                    <Text style={styles.approvalText}>
+                      {req.method === 'BANK_TRANSFER' ? 'Ref: ' : 'Ref: '}{req.adminNotes}
+                    </Text>
                   </View>
                 ) : null}
               </View>
@@ -446,12 +548,10 @@ const styles = StyleSheet.create({
   loadingText:{ marginTop: 8, color: '#6B7280', fontSize: 15, fontFamily: 'Nunito-Regular' },
   errorText:  { marginTop: 8, color: '#DC2626', fontSize: 15, fontFamily: 'Nunito-Regular', textAlign: 'center', paddingHorizontal: 24 },
 
-  // Header
   header:      { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 },
   headerTitle: { fontSize: 26, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827' },
   headerSub:   { fontSize: 14, fontFamily: 'Nunito-Regular', color: '#6B7280', marginTop: 2 },
 
-  // Balance card
   balanceCard:   { margin: 16, backgroundColor: '#fff', borderRadius: 16, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
   balanceRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   balanceLabel:  { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#6B7280', marginBottom: 4 },
@@ -463,17 +563,31 @@ const styles = StyleSheet.create({
   insufficientBanner:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, backgroundColor: '#F3F4F6', borderRadius: 8, padding: 10 },
   insufficientBannerText: { color: '#6B7280', fontSize: 13, fontFamily: 'Nunito-Regular', flex: 1 },
 
-  // Request button
   requestBtn:         { marginHorizontal: 16, backgroundColor: '#5B94D3', borderRadius: 14, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, shadowColor: '#5B94D3', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   requestBtnDisabled: { backgroundColor: '#9CA3AF', shadowOpacity: 0 },
   requestBtnText:     { color: '#fff', fontSize: 16, fontWeight: '700', fontFamily: 'Nunito-Bold' },
 
-  // Form
   formCard:    { margin: 16, backgroundColor: '#fff', borderRadius: 16, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
   formHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   formTitle:   { fontSize: 18, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827' },
-
   fieldLabel:  { fontSize: 13, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#374151', marginBottom: 8 },
+
+  // Method selection cards
+  methodRow:         { flexDirection: 'row', gap: 10, marginBottom: 20 },
+  methodCard:        { flex: 1, borderRadius: 14, borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', padding: 14, alignItems: 'center', gap: 6, position: 'relative' },
+  methodCardActive:  { borderColor: '#5B94D3', backgroundColor: '#EFF6FF' },
+  methodCardDisabled:{ opacity: 0.6 },
+  methodIcon:        { width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
+  methodIconActive:  { backgroundColor: '#5B94D3' },
+  methodIconDisabled:{ backgroundColor: '#F3F4F6' },
+  methodTitle:       { fontSize: 14, fontFamily: 'Nunito-Bold', color: '#374151' },
+  methodTitleActive: { color: '#1D4ED8' },
+  methodTitleDisabled:{ color: '#9CA3AF' },
+  methodSub:         { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#9CA3AF', textAlign: 'center' },
+  methodSubActive:   { color: '#3B82F6' },
+  methodSubDisabled: { color: '#D1D5DB' },
+  methodCheck:       { position: 'absolute', top: 8, right: 8 },
+  methodLock:        { position: 'absolute', top: 8, right: 8 },
 
   quickRow:    { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 16 },
   quickBtn:    { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
@@ -501,20 +615,25 @@ const styles = StyleSheet.create({
   submitBtnDisabled: { backgroundColor: '#9CA3AF' },
   submitBtnText:     { color: '#fff', fontSize: 16, fontWeight: '700', fontFamily: 'Nunito-Bold' },
 
-  // Section title
   sectionTitle: { fontSize: 17, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#111827', marginHorizontal: 16, marginTop: 24, marginBottom: 12 },
 
-  // Empty state
   emptyState: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 },
   emptyTitle: { fontSize: 16, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#6B7280', marginTop: 12 },
   emptySub:   { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#9CA3AF', marginTop: 4 },
 
-  // Request card
   requestCard:   { marginHorizontal: 16, marginBottom: 10, backgroundColor: '#fff', borderRadius: 14, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
   requestRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   statusBadge:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   statusText:    { fontSize: 12, fontWeight: '600', fontFamily: 'Nunito-SemiBold' },
   requestAmount: { fontSize: 18, fontWeight: '800', fontFamily: 'Nunito-Bold', color: '#111827' },
+
+  methodBadgeRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  methodBadge:         { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  methodBadgeBank:     { backgroundColor: '#ECFDF5' },
+  methodBadgeEwallet:  { backgroundColor: '#EFF6FF' },
+  methodBadgeText:     { fontSize: 11, fontFamily: 'Nunito-SemiBold' },
+  methodBadgeTextBank: { color: '#059669' },
+  methodBadgeTextEwallet: { color: '#2563EB' },
   requestDate:   { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9CA3AF' },
   requestNotes:  { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#6B7280', marginTop: 6, fontStyle: 'italic' },
 
@@ -525,7 +644,6 @@ const styles = StyleSheet.create({
   approvalBox:   { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8, backgroundColor: '#D1FAE5', borderRadius: 8, padding: 8 },
   approvalText:  { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#059669', flex: 1 },
 
-  // Auto-payout card
   autoPayoutCard:   { marginHorizontal: 16, marginBottom: 12, backgroundColor: '#ECFDF5', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#A7F3D0' },
   autoPayoutHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   autoPayoutTitle:  { fontSize: 13, fontWeight: '700', fontFamily: 'Nunito-Bold', color: '#059669' },

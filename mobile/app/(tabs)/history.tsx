@@ -21,6 +21,23 @@ import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatDate } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
 import { getTransactions, Transaction } from '../../services/mobileApiService';
+import { CHANNEL_STYLE } from '../../src/lib/tips';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function isFailed(tx: Transaction) {
+  return tx.status === 'FAILED' || tx.status === 'REVERSED';
+}
+
+/** Netcash replied but the old system misread it: not a confirmed failure. */
+function isUnconfirmed(tx: Transaction) {
+  return tx.status === 'UNCONFIRMED';
+}
+
+/** Money that actually moved. Failed, unconfirmed and pending items never count. */
+function isCompleted(tx: Transaction) {
+  return (tx.status || 'COMPLETED') === 'COMPLETED';
+}
 
 // ── Animated spinner ─────────────────────────────────────────────────────────
 function Spinner() {
@@ -49,48 +66,143 @@ function Spinner() {
   );
 }
 
-// ── Animated transaction row ──────────────────────────────────────────────────
+// ── Failed payment info banner ────────────────────────────────────────────────
+function FailedBanner({ count }: { count: number }) {
+  return (
+    <Reanimated.View entering={FadeInDown.duration(350)} style={hStyles.bannerWrap}>
+      <LinearGradient colors={['#FEF3C7', '#FDE68A']} style={hStyles.bannerGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+        <View style={hStyles.bannerIcon}>
+          <Ionicons name="warning" size={20} color="#B45309" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={hStyles.bannerTitle}>
+            {count} failed payment{count !== 1 ? 's' : ''}
+          </Text>
+          <Text style={hStyles.bannerBody}>
+            These were attempts by customers that didn't go through their bank. No funds reached your account for these — it's not money the company is holding back.
+          </Text>
+        </View>
+      </LinearGradient>
+    </Reanimated.View>
+  );
+}
+
+// ── Transaction row ───────────────────────────────────────────────────────────
 function TxRow({ item, index }: { item: Transaction; index: number }) {
+  const failed = isFailed(item);
+  const unconfirmed = isUnconfirmed(item);
+  const channel = item.channel ? CHANNEL_STYLE[item.channel] : null;
+
   const iconMap: Record<string, { name: string; color: string }> = {
     TIP:         { name: 'cash',            color: '#10B981' },
     PAYOUT:      { name: 'wallet',          color: '#B01519' },
     AIRTIME:     { name: 'phone-portrait',  color: '#5B94D3' },
     ELECTRICITY: { name: 'flash',           color: '#F59E0B' },
   };
-  const icon = iconMap[item.type?.toUpperCase()] ?? { name: 'swap-horizontal', color: '#5B94D3' };
+  const baseIcon = iconMap[item.type?.toUpperCase()] ?? { name: 'swap-horizontal', color: '#5B94D3' };
+  const icon = failed
+    ? { name: 'close-circle', color: '#EF4444' }
+    : unconfirmed
+      ? { name: 'help-circle', color: '#B45309' }
+      : baseIcon;
+
   const isIncome = item.amount > 0;
   const hasCommission = (item as any).metadata?.commissionAmount > 0;
+  const reason = item.explanation || item.failureReason || 'Payment didn\'t go through';
+  const pill = item.status === 'REVERSED' ? 'Reversed' : 'Failed';
+
+  const metaParts = [
+    formatDate(item.date),
+    item.time,
+    item.paymentMethod,
+  ].filter(Boolean).join(' · ');
 
   return (
-    <Reanimated.View entering={FadeInDown.delay(index * 40).springify().damping(18)} style={hStyles.txRow}>
-      <View style={[hStyles.txIcon, { backgroundColor: icon.color + '20' }]}>
+    <Reanimated.View
+      entering={FadeInDown.delay(index * 40).springify().damping(18)}
+      style={[hStyles.txRow, failed && hStyles.txRowFailed, unconfirmed && hStyles.txRowUnconfirmed]}
+    >
+      <View style={[hStyles.txIcon, { backgroundColor: failed ? '#FEE2E2' : unconfirmed ? '#FEF3C7' : icon.color + '20' }]}>
         <Ionicons name={icon.name as any} size={16} color={icon.color} />
       </View>
+
       <View style={{ flex: 1 }}>
+        {/* top row: description + badge + amount */}
         <View style={hStyles.txTopRow}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 6 }}>
-            <Text style={hStyles.txDesc} numberOfLines={1}>
+            <Text
+              style={[hStyles.txDesc, failed && hStyles.txDescFailed]}
+              numberOfLines={1}
+            >
               {(item as any).description || (item.type === 'TIP' ? 'Tip received' : item.type)}
             </Text>
-            {(item as any).isAutomatic && (
+            {failed && (
+              <View style={hStyles.failedBadge}>
+                <Text style={hStyles.failedBadgeText}>{pill}</Text>
+              </View>
+            )}
+            {unconfirmed && (
+              <View style={hStyles.unconfirmedBadge}>
+                <Text style={hStyles.unconfirmedBadgeText}>Unconfirmed</Text>
+              </View>
+            )}
+            {channel && (
+              <View style={[hStyles.channelBadge, { backgroundColor: channel.bg }]}>
+                <Ionicons name={channel.icon as any} size={9} color={channel.color} />
+                <Text style={[hStyles.channelBadgeText, { color: channel.color }]}>{channel.short}</Text>
+              </View>
+            )}
+            {!failed && (item as any).isAutomatic && (
               <View style={hStyles.autoBadge}>
                 <Ionicons name="flash" size={9} color="#059669" />
                 <Text style={hStyles.autoBadgeText}>Auto</Text>
               </View>
             )}
           </View>
-          <Text style={[hStyles.txAmount, { color: isIncome ? '#10B981' : '#B01519' }]}>
-            {isIncome ? '+' : ''}{formatCurrency(Math.abs(item.amount))}
-          </Text>
+          {failed || unconfirmed ? (
+            <Text style={hStyles.txAmountStruck}>
+              {isIncome ? '+' : ''}{formatCurrency(Math.abs(item.amount))}
+            </Text>
+          ) : (
+            <Text style={[hStyles.txAmount, { color: isIncome ? '#10B981' : '#B01519' }]}>
+              {isIncome ? '+' : ''}{formatCurrency(Math.abs(item.amount))}
+            </Text>
+          )}
         </View>
+
+        {/* meta: date · time · payment method */}
         <View style={hStyles.txBottomRow}>
-          <Text style={hStyles.txMeta}>{formatDate(item.date)} · {item.time}</Text>
-          <Text style={hStyles.txMeta}>Bal: {formatCurrency((item as any).balance)}</Text>
+          <Text style={hStyles.txMeta}>{metaParts}</Text>
+          {!failed && item.balance != null && (
+            <Text style={hStyles.txMeta}>Bal: {formatCurrency(item.balance)}</Text>
+          )}
         </View>
-        {(item as any).reference && (
+
+        {/* unconfirmed: say plainly what it is */}
+        {unconfirmed && (
+          <View style={hStyles.unconfirmedBox}>
+            <Ionicons name="information-circle-outline" size={13} color="#B45309" style={{ marginTop: 1 }} />
+            <Text style={hStyles.unconfirmedText}>{item.explanation}</Text>
+          </View>
+        )}
+
+        {/* completed tips: how much reached the balance */}
+        {!failed && !unconfirmed && item.type?.toUpperCase() === 'TIP' && !!item.explanation && (
+          <Text style={hStyles.txExplain}>{item.explanation}</Text>
+        )}
+
+        {/* failure reason callout */}
+        {failed && (
+          <View style={hStyles.reasonBox}>
+            <Ionicons name="information-circle-outline" size={13} color="#B91C1C" style={{ marginTop: 1 }} />
+            <Text style={hStyles.reasonText}>{reason}</Text>
+          </View>
+        )}
+
+        {!failed && (item as any).reference && (
           <Text style={hStyles.txRef}>Ref: {(item as any).reference}</Text>
         )}
-        {hasCommission && (
+        {!failed && !unconfirmed && hasCommission && !item.explanation && (
           <View style={hStyles.commissionBadge}>
             <Text style={hStyles.commissionText}>
               {(item as any).metadata.commissionRate}% commission · received {formatCurrency((item as any).metadata.guardReceivesAmount)}
@@ -107,18 +219,18 @@ export default function HistoryScreen() {
   const { token, logoutWithMessage } = useAuth();
   const { } = useGuard();
 
-  const [refreshing, setRefreshing]       = useState(false);
-  const [loading, setLoading]             = useState(true);
-  const [error, setError]                 = useState<string | null>(null);
-  const [transactions, setTransactions]   = useState<Transaction[]>([]);
+  const [refreshing, setRefreshing]         = useState(false);
+  const [loading, setLoading]               = useState(true);
+  const [error, setError]                   = useState<string | null>(null);
+  const [transactions, setTransactions]     = useState<Transaction[]>([]);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [selectedPeriod, setSelectedPeriod] = useState('All Time');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
-  const [currentPage, setCurrentPage]     = useState(1);
+  const [currentPage, setCurrentPage]       = useState(1);
   const itemsPerPage = 10;
-  const [showCalendar, setShowCalendar]   = useState(false);
-  const [calendarStep, setCalendarStep]   = useState<'start' | 'end'>('start');
-  const [markedDates, setMarkedDates]     = useState<Record<string, any>>({});
+  const [showCalendar, setShowCalendar]     = useState(false);
+  const [calendarStep, setCalendarStep]     = useState<'start' | 'end'>('start');
+  const [markedDates, setMarkedDates]       = useState<Record<string, any>>({});
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate]     = useState('');
 
@@ -168,14 +280,12 @@ export default function HistoryScreen() {
       setCalendarStep('end');
     } else {
       if (d < customStartDate) {
-        // swap
         setCustomStartDate(d);
         setMarkedDates({ [d]: { startingDay: true, color: '#5B94D3', textColor: '#fff' } });
         setCalendarStep('end');
         return;
       }
       setCustomEndDate(d);
-      // Fill range
       const marks: Record<string, any> = {};
       const cursor = new Date(customStartDate);
       const end = new Date(d);
@@ -198,8 +308,7 @@ export default function HistoryScreen() {
 
   const applyCalendarRange = () => {
     if (!customStartDate || !customEndDate) return;
-    const label = `${customStartDate} → ${customEndDate}`;
-    setSelectedPeriod(`Custom: ${label}`);
+    setSelectedPeriod(`Custom: ${customStartDate} → ${customEndDate}`);
     setCurrentPage(1);
     setShowCalendar(false);
   };
@@ -221,24 +330,33 @@ export default function HistoryScreen() {
     switch (period) {
       case 'Today':      return txDate.toDateString() === today.toDateString();
       case 'Yesterday':  return txDate.toDateString() === yesterday.toDateString();
-      case 'This Week': { const s = new Date(today); s.setDate(today.getDate() - today.getDay()); return txDate >= s && txDate <= today; }
-      case 'This Month':{ const s = new Date(today.getFullYear(), today.getMonth(), 1); return txDate >= s && txDate <= today; }
-      case 'Last 7 Days':{ const s = new Date(today); s.setDate(today.getDate() - 7); return txDate >= s && txDate <= today; }
-      case 'Last 30 Days':{ const s = new Date(today); s.setDate(today.getDate() - 30); return txDate >= s && txDate <= today; }
+      case 'This Week':  { const s = new Date(today); s.setDate(today.getDate() - today.getDay()); return txDate >= s && txDate <= today; }
+      case 'This Month': { const s = new Date(today.getFullYear(), today.getMonth(), 1); return txDate >= s && txDate <= today; }
+      case 'Last 7 Days':  { const s = new Date(today); s.setDate(today.getDate() - 7); return txDate >= s && txDate <= today; }
+      case 'Last 30 Days': { const s = new Date(today); s.setDate(today.getDate() - 30); return txDate >= s && txDate <= today; }
       default: return true;
     }
   };
 
   const filteredTransactions = transactions.filter(tx => {
     if (!isDateInPeriod(tx.date, selectedPeriod)) return false;
-    if (selectedFilter === 'income')   return ['TIP'].includes(tx.type.toUpperCase());
-    if (selectedFilter === 'expenses') return ['PAYOUT', 'AIRTIME', 'ELECTRICITY', 'VOUCHER'].includes(tx.type.toUpperCase());
-    return true;
+    switch (selectedFilter) {
+      case 'successful': return isCompleted(tx);
+      case 'failed':     return isFailed(tx);
+      case 'tips':       return tx.type.toUpperCase() === 'TIP';
+      case 'payouts':    return tx.type.toUpperCase() === 'PAYOUT';
+      default:           return true;
+    }
   });
 
-  const income   = filteredTransactions.filter(t => t.type.toUpperCase() === 'TIP').reduce((s, t) => s + t.amount, 0);
-  const expenses = filteredTransactions.filter(t => ['PAYOUT','AIRTIME','ELECTRICITY','VOUCHER'].includes(t.type.toUpperCase())).reduce((s, t) => s + t.amount, 0);
+  // Summary: only money that actually moved (not failed, unconfirmed or pending)
+  const completedTxs = filteredTransactions.filter(isCompleted);
+  const income   = completedTxs.filter(t => t.type.toUpperCase() === 'TIP').reduce((s, t) => s + t.amount, 0);
+  const expenses = completedTxs.filter(t => ['PAYOUT','AIRTIME','ELECTRICITY','VOUCHER'].includes(t.type.toUpperCase())).reduce((s, t) => s + Math.abs(t.amount), 0);
   const netAmount = income - expenses;
+
+  // Failed count across full unfiltered list (for banner + badge)
+  const totalFailedCount = transactions.filter(isFailed).length;
 
   const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
   const paginatedTransactions = filteredTransactions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -255,6 +373,29 @@ export default function HistoryScreen() {
     const end = `${adjustedYear}-${String(adjustedMonth + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
     return { label, start, end };
   });
+
+  // ── Filter chips config ─────────────────────────────────────────────────────
+  const filterChips = [
+    { key: 'all',        label: 'All' },
+    { key: 'successful', label: 'Successful' },
+    { key: 'failed',     label: 'Failed', badge: totalFailedCount > 0 ? totalFailedCount : undefined, danger: true },
+    { key: 'tips',       label: 'Tips' },
+    { key: 'payouts',    label: 'Payouts' },
+  ];
+
+  // ── List header ─────────────────────────────────────────────────────────────
+  const ListHeader = () => (
+    <>
+      {totalFailedCount > 0 && selectedFilter !== 'failed' && (
+        <FailedBanner count={totalFailedCount} />
+      )}
+    </>
+  );
+
+  // ── Empty state label ────────────────────────────────────────────────────────
+  const emptyLabel = selectedFilter === 'failed'
+    ? 'No failed payments — all good!'
+    : `No ${selectedFilter !== 'all' ? selectedFilter + ' ' : ''}transactions for ${selectedPeriod}.`;
 
   return (
     <TouchableWithoutFeedback onPress={() => setShowPeriodDropdown(false)}>
@@ -309,13 +450,34 @@ export default function HistoryScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── Type pills ── */}
+        {/* ── Type filter chips ── */}
         <View style={hStyles.pillRow}>
-          {[{ key: 'all', label: 'All' }, { key: 'income', label: 'Income' }, { key: 'expenses', label: 'Expenses' }].map(f => {
+          {filterChips.map(f => {
             const active = selectedFilter === f.key;
+            const isDanger = f.danger;
             return (
-              <TouchableOpacity key={f.key} onPress={() => { setSelectedFilter(f.key); setCurrentPage(1); }} style={[hStyles.pill, active && hStyles.pillActive]} activeOpacity={0.7}>
-                <Text style={[hStyles.pillText, active && hStyles.pillTextActive]}>{f.label}</Text>
+              <TouchableOpacity
+                key={f.key}
+                onPress={() => { setSelectedFilter(f.key); setCurrentPage(1); }}
+                style={[
+                  hStyles.pill,
+                  active && (isDanger ? hStyles.pillActiveDanger : hStyles.pillActive),
+                  !active && isDanger && hStyles.pillDanger,
+                ]}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  hStyles.pillText,
+                  active && hStyles.pillTextActive,
+                  !active && isDanger && hStyles.pillTextDanger,
+                ]}>
+                  {f.label}
+                </Text>
+                {f.badge != null && (
+                  <View style={[hStyles.pillBadge, active && { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
+                    <Text style={hStyles.pillBadgeText}>{f.badge}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             );
           })}
@@ -330,21 +492,32 @@ export default function HistoryScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#5B94D3" />}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 20, flexGrow: 1 }}
+          ListHeaderComponent={<ListHeader />}
           ListEmptyComponent={
             loading ? <Spinner /> : error ? (
               <Reanimated.View entering={FadeIn} style={hStyles.centeredState}>
                 <View style={hStyles.stateIconBg}><Ionicons name="alert-circle-outline" size={32} color="#DC2626" /></View>
                 <Text style={[hStyles.stateTitle, { color: '#DC2626' }]}>Unable to load</Text>
-                <Text style={hStyles.stateText}>{error}</Text>
+                <View style={hStyles.errorCard}>
+                  <Text style={hStyles.errorCardText}>{error}</Text>
+                </View>
                 <TouchableOpacity style={hStyles.retryBtn} onPress={loadData}>
                   <Text style={hStyles.retryText}>Try Again</Text>
                 </TouchableOpacity>
               </Reanimated.View>
             ) : (
               <Reanimated.View entering={ZoomIn.springify()} style={hStyles.centeredState}>
-                <View style={hStyles.stateIconBg}><Ionicons name="receipt-outline" size={32} color="#9CA3AF" /></View>
-                <Text style={hStyles.stateTitle}>No transactions</Text>
-                <Text style={hStyles.stateText}>No {selectedFilter !== 'all' ? selectedFilter + ' ' : ''}transactions for {selectedPeriod}.</Text>
+                <View style={[hStyles.stateIconBg, selectedFilter === 'failed' && { backgroundColor: '#FEF2F2' }]}>
+                  <Ionicons
+                    name={selectedFilter === 'failed' ? 'checkmark-circle-outline' : 'receipt-outline'}
+                    size={32}
+                    color={selectedFilter === 'failed' ? '#10B981' : '#9CA3AF'}
+                  />
+                </View>
+                <Text style={hStyles.stateTitle}>
+                  {selectedFilter === 'failed' ? 'No failed payments — all good!' : 'No transactions'}
+                </Text>
+                <Text style={hStyles.stateText}>{emptyLabel}</Text>
               </Reanimated.View>
             )
           }
@@ -375,7 +548,6 @@ export default function HistoryScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Step indicator */}
               <Reanimated.View entering={FadeIn.delay(100).duration(300)} style={hStyles.stepRow}>
                 <View style={[hStyles.stepDot, calendarStep === 'start' && hStyles.stepDotActive]}>
                   <Text style={[hStyles.stepDotText, calendarStep === 'start' && { color: '#fff' }]}>1</Text>
@@ -389,7 +561,6 @@ export default function HistoryScreen() {
                 </Text>
               </Reanimated.View>
 
-              {/* Selected range display */}
               {(customStartDate || customEndDate) && (
                 <Reanimated.View entering={ZoomIn.springify().damping(16)} style={hStyles.rangeDisplay}>
                   <View style={hStyles.rangeItem}>
@@ -428,7 +599,6 @@ export default function HistoryScreen() {
                 }}
               />
 
-              {/* Quick month chips */}
               <Text style={[hStyles.inputLabel, { marginTop: 12 }]}>Quick Select</Text>
               <View style={hStyles.quickRow}>
                 {quickMonths.map(m => (
@@ -438,7 +608,6 @@ export default function HistoryScreen() {
                     onPress={() => {
                       setCustomStartDate(m.start);
                       setCustomEndDate(m.end);
-                      // Build marks for whole month
                       const marks: Record<string, any> = {};
                       const cursor = new Date(m.start);
                       const end = new Date(m.end);
@@ -497,6 +666,13 @@ const hStyles = StyleSheet.create({
   summaryAmount:{ fontSize: 17, fontWeight: '800', fontFamily: 'Nunito-Bold' },
   summaryDivider:{ width: 1, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 8 },
 
+  // Failed banner
+  bannerWrap:       { marginHorizontal: 12, marginTop: 12, marginBottom: 4, borderRadius: 14, overflow: 'hidden' },
+  bannerGradient:   { flexDirection: 'row', alignItems: 'flex-start', padding: 12, gap: 10 },
+  bannerIcon:       { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(180,83,9,0.15)', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 },
+  bannerTitle:      { fontSize: 13, fontFamily: 'Nunito-Bold', color: '#92400E', marginBottom: 4 },
+  bannerBody:       { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#78350F', lineHeight: 17 },
+
   // Filter bar
   filterBar:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   periodBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EFF6FF', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, flex: 1 },
@@ -510,24 +686,49 @@ const hStyles = StyleSheet.create({
   dropdownTextActive: { color: '#5B94D3', fontFamily: 'Nunito-SemiBold' },
 
   // Pills
-  pillRow:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
-  pill:         { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, backgroundColor: '#F3F4F6' },
-  pillActive:   { backgroundColor: '#5B94D3' },
-  pillText:     { fontSize: 13, fontFamily: 'Nunito-SemiBold', color: '#6B7280' },
-  pillTextActive:{ color: '#fff' },
-  countText:    { marginLeft: 'auto' as any, fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9CA3AF' },
+  pillRow:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 12, paddingBottom: 12, paddingTop: 4, gap: 6, flexWrap: 'nowrap' },
+  pill:              { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: '#F3F4F6' },
+  pillActive:        { backgroundColor: '#5B94D3' },
+  pillActiveDanger:  { backgroundColor: '#DC2626' },
+  pillDanger:        { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA' },
+  pillText:          { fontSize: 12, fontFamily: 'Nunito-SemiBold', color: '#6B7280' },
+  pillTextActive:    { color: '#fff' },
+  pillTextDanger:    { color: '#DC2626' },
+  pillBadge:         { backgroundColor: '#DC2626', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  pillBadgeText:     { fontSize: 10, fontFamily: 'Nunito-Bold', color: '#fff' },
+  countText:         { marginLeft: 'auto' as any, fontSize: 11, fontFamily: 'Nunito-Regular', color: '#9CA3AF' },
 
-  // Transaction row
-  txRow:        { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
-  txIcon:       { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
-  txTopRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-  txDesc:       { fontSize: 14, fontFamily: 'Nunito-SemiBold', color: '#111827', flex: 1 },
-  txAmount:     { fontSize: 14, fontFamily: 'Nunito-Bold' },
-  txBottomRow:  { flexDirection: 'row', justifyContent: 'space-between' },
-  txMeta:       { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9CA3AF' },
-  txRef:        { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#D1D5DB', marginTop: 2 },
-  autoBadge:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, gap: 3 },
-  autoBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#059669' },
+  // Transaction rows
+  txRow:         { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
+  txRowFailed:   { backgroundColor: '#FFF5F5' },
+  txRowUnconfirmed: { backgroundColor: '#FFFBEB' },
+  txExplain:     { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#4B5563', marginTop: 4, lineHeight: 17 },
+  txIcon:        { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
+  txTopRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  txDesc:        { fontSize: 14, fontFamily: 'Nunito-SemiBold', color: '#111827', flex: 1 },
+  txDescFailed:  { color: '#B91C1C' },
+  txAmount:      { fontSize: 14, fontFamily: 'Nunito-Bold' },
+  txAmountStruck:{ fontSize: 14, fontFamily: 'Nunito-Bold', color: '#9CA3AF', textDecorationLine: 'line-through' },
+  txBottomRow:   { flexDirection: 'row', justifyContent: 'space-between' },
+  txMeta:        { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9CA3AF' },
+  txRef:         { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#D1D5DB', marginTop: 2 },
+
+  // Badges
+  autoBadge:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, gap: 3 },
+  autoBadgeText: { fontSize: 10, fontFamily: 'Nunito-Bold', color: '#059669' },
+  failedBadge:   { backgroundColor: '#FEE2E2', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  unconfirmedBadge:{ backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  unconfirmedBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#B45309', textTransform: 'uppercase', letterSpacing: 0.3 },
+  channelBadge:  { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  channelBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold' },
+  unconfirmedBox:{ flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, backgroundColor: '#FFFBEB', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#FDE68A' },
+  unconfirmedText:{ fontSize: 11, fontFamily: 'Nunito-Regular', color: '#92400E', flex: 1, lineHeight: 16 },
+  failedBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#DC2626', textTransform: 'uppercase', letterSpacing: 0.3 },
+
+  // Failure reason callout
+  reasonBox:    { flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, backgroundColor: '#FEF2F2', borderRadius: 8, padding: 8 },
+  reasonText:   { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#B91C1C', flex: 1, lineHeight: 16 },
+
   commissionBadge:{ marginTop: 6, backgroundColor: '#EFF6FF', borderRadius: 8, padding: 6 },
   commissionText: { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#1D4ED8' },
 
@@ -542,7 +743,9 @@ const hStyles = StyleSheet.create({
   stateIconBg:  { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   stateTitle:   { fontSize: 16, fontFamily: 'Nunito-Bold', color: '#374151', marginBottom: 6 },
   stateText:    { fontSize: 13, fontFamily: 'Nunito-Regular', color: '#9CA3AF', textAlign: 'center', lineHeight: 20 },
-  retryBtn:     { marginTop: 16, backgroundColor: '#5B94D3', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 10 },
+  errorCard:    { borderWidth: 1, borderColor: '#FECACA', backgroundColor: '#FEF2F2', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, marginBottom: 12, width: '100%' },
+  errorCardText:{ fontSize: 13, fontFamily: 'Nunito-Regular', color: '#DC2626', textAlign: 'center' },
+  retryBtn:     { marginTop: 4, backgroundColor: '#5B94D3', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 10 },
   retryText:    { color: '#fff', fontFamily: 'Nunito-SemiBold', fontSize: 14 },
 
   // Pagination
@@ -558,27 +761,19 @@ const hStyles = StyleSheet.create({
   sheetHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   sheetTitle:   { fontSize: 18, fontFamily: 'Nunito-Bold', color: '#111827' },
   inputLabel:   { fontSize: 13, fontFamily: 'Nunito-SemiBold', color: '#374151', marginBottom: 8 },
-
-  // Step indicator
   stepRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
   stepDot:      { width: 26, height: 26, borderRadius: 13, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#E5E7EB' },
   stepDotActive:{ backgroundColor: '#5B94D3', borderColor: '#5B94D3' },
   stepDotText:  { fontSize: 12, fontFamily: 'Nunito-Bold', color: '#9CA3AF' },
   stepLine:     { flex: 1, height: 2, backgroundColor: '#E5E7EB', maxWidth: 20 },
   stepHint:     { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9CA3AF', flex: 1 },
-
-  // Range display
   rangeDisplay: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', backgroundColor: '#EFF6FF', borderRadius: 12, padding: 12, marginBottom: 12 },
   rangeItem:    { alignItems: 'center' },
   rangeLabel:   { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#6B7280', marginBottom: 2 },
   rangeDate:    { fontSize: 14, fontFamily: 'Nunito-Bold', color: '#1D4ED8' },
-
-  // Quick chips
   quickRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
   quickChip:    { backgroundColor: '#EFF6FF', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   quickChipText:{ fontSize: 13, color: '#1D4ED8', fontFamily: 'Nunito-Medium' },
-
-  // Sheet actions
   sheetActions: { flexDirection: 'row', gap: 12 },
   cancelBtn:    { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   cancelText:   { color: '#6B7280', fontFamily: 'Nunito-SemiBold', fontSize: 15 },
