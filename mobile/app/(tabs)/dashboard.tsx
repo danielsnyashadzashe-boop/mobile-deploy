@@ -14,16 +14,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
 import { useRouter } from 'expo-router';
 import { formatCurrency } from '../../data/mockData';
 import { TippaLogo } from '../../components/TippaLogo';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuard } from '../../contexts/GuardContext';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { getTransactions } from '../../services/mobileApiService';
+import { getTransactions, getTipActivity, TipAttempt } from '../../services/mobileApiService';
+import { QrCodesCard } from '../../components/QrCodesCard';
+import { TipFeedRow } from '../../components/TipFeedRow';
+import { buildTipFeed, localDay, tipLinkFor } from '../../src/lib/tips';
 
 type AlertModalState = { visible: boolean; type: 'success' | 'error' | 'info'; title: string; message: string };
 
@@ -45,22 +45,20 @@ export default function DashboardScreen() {
     status: 'ACTIVE',
     qrCode: null,
     qrCodeUrl: null,
+    tipLink: null,
+    location: null,
   } : null);
 
   const [refreshing, setRefreshing] = useState(false);
-  const [downloadingQR, setDownloadingQR] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const qrViewRef = useRef(null);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [comingSoonFeature, setComingSoonFeature] = useState('');
-  const [qrImageLoading, setQrImageLoading] = useState(true);
-  const [qrImageError, setQrImageError] = useState(false);
-  const [showQRModal, setShowQRModal] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [todayEarnings, setTodayEarnings] = useState(0);
   const [weekEarnings, setWeekEarnings] = useState(0);
   const [totalTips, setTotalTips] = useState(0);
+  const [attempts, setAttempts] = useState<TipAttempt[]>([]);
   const [alertModal, setAlertModal] = useState<AlertModalState>({
     visible: false, type: 'info', title: '', message: '',
   });
@@ -81,34 +79,28 @@ export default function DashboardScreen() {
     if (!authGuard) return;
     try {
       setError(null);
-      setQrImageLoading(true);
-      setQrImageError(false);
 
       if (token) {
-        const txResponse = await getTransactions('', { limit: 100 }, token);
+        const [txResponse, activity] = await Promise.all([
+          getTransactions('', { limit: 100 }, token),
+          getTipActivity(token, 30),
+        ]);
+        if (activity.success && activity.data) setAttempts(activity.data.attempts);
         if (txResponse.success && txResponse.data?.transactions) {
           const txList = txResponse.data.transactions;
           setTransactions(txList);
 
-          const today = new Date().toISOString().split('T')[0];
-          const todayTips = txList
-            .filter((t: any) => t.type === 'TIP' && t.date === today)
-            .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
-          setTodayEarnings(todayTips);
+          // Only tips that were actually paid count. Failed, unconfirmed and pending
+          // ones are listed in Tip activity but never added up as money.
+          const paidTips = txList.filter((t: any) => t.type === 'TIP' && t.status === 'COMPLETED');
+          const today = localDay();
+          setTodayEarnings(paidTips.filter((t: any) => localDay(new Date(t.createdAt)) === today).reduce((sum: number, t: any) => sum + (t.amount || 0), 0));
 
           const weekAgo = new Date();
           weekAgo.setDate(weekAgo.getDate() - 7);
-          const weekTips = txList
-            .filter((t: any) => {
-              if (t.type !== 'TIP') return false;
-              const txDate = new Date(t.createdAt || t.date);
-              return txDate >= weekAgo;
-            })
-            .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
-          setWeekEarnings(weekTips);
+          setWeekEarnings(paidTips.filter((t: any) => new Date(t.createdAt) >= weekAgo).reduce((sum: number, t: any) => sum + (t.amount || 0), 0));
 
-          const allTips = txList.filter((t: any) => t.type === 'TIP');
-          setTotalTips(allTips.length);
+          setTotalTips(paidTips.length);
         }
       }
     } catch (err) {
@@ -129,50 +121,6 @@ export default function DashboardScreen() {
     }
   }, [authGuard, refreshGuard]);
 
-  const downloadQRCode = async () => {
-    if (!qrViewRef.current) {
-      showAlert('error', 'Not Ready', 'QR code is not ready yet. Please try again.');
-      return;
-    }
-    try {
-      setDownloadingQR(true);
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const uri = await captureRef(qrViewRef.current, {
-        format: 'png',
-        quality: 1.0,
-        width: 1200,
-        height: 1200,
-        result: 'tmpfile',
-      });
-
-      const displayName = guardData?.fullName || authGuard?.phone || 'Guard';
-      const guardName = displayName.replace(/[^a-zA-Z0-9]/g, '_');
-      const guardId = guardData?.guardId || 'N/A';
-      const filename = `TippaQR_${guardName}_${guardId}_300DPI.png`;
-      const downloadPath = `${FileSystem.documentDirectory}${filename}`;
-
-      await FileSystem.copyAsync({ from: uri, to: downloadPath });
-      try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {}
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(downloadPath, {
-          mimeType: 'image/png',
-          dialogTitle: 'Save QR Code for Printing (300 DPI)',
-        });
-        showAlert('success', 'QR Code Ready!', 'Your QR code has been prepared for download. It is optimised for 300 DPI high-quality printing.');
-      } else {
-        showAlert('success', 'QR Code Saved', `Saved as:\n${filename}\n\nOptimised for 300 DPI printing.`);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      showAlert('error', 'Download Failed', `Could not save QR code: ${errorMessage}\n\nPlease try again.`);
-    } finally {
-      setDownloadingQR(false);
-    }
-  };
-
   const handleQuickAction = (action: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (action === 'airtime') { setComingSoonFeature('Airtime Purchase'); setShowComingSoon(true); }
@@ -180,8 +128,10 @@ export default function DashboardScreen() {
   };
 
   const calculateInsAndOuts = () => {
-    const income = transactions.filter(t => t.type === 'TIP').reduce((sum, t) => sum + (t.amount || 0), 0);
-    const expenses = transactions.filter(t => t.type !== 'TIP').reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+    // Completed money only: a failed or unconfirmed tip never reached the balance.
+    const done = transactions.filter(t => (t.status || 'COMPLETED') === 'COMPLETED');
+    const income = done.filter(t => t.type === 'TIP').reduce((sum, t) => sum + (t.amount || 0), 0);
+    const expenses = done.filter(t => t.type !== 'TIP').reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
     return { income, expenses };
   };
 
@@ -228,15 +178,17 @@ export default function DashboardScreen() {
             </Text>
           </View>
 
-          {/* QR Code Section */}
-          <View className="bg-white rounded-2xl p-6 shadow-md items-center">
-            {(loading || guardLoading) ? (
-              <View className="py-20">
-                <ActivityIndicator size="large" color="#5B94D3" />
-                <Text className="text-sm text-gray-500 mt-4">Loading QR code...</Text>
-              </View>
-            ) : error ? (
+          {/* Your QR codes: the Tippa QR (new lanyard) and the Netcash QR (original lanyard) */}
+          {(loading || guardLoading) ? (
+            <View className="bg-white rounded-2xl p-6 shadow-md items-center">
               <View className="py-20 items-center">
+                <ActivityIndicator size="large" color="#5B94D3" />
+                <Text className="text-sm text-gray-500 mt-4">Loading your QR codes...</Text>
+              </View>
+            </View>
+          ) : error ? (
+            <View className="bg-white rounded-2xl p-6 shadow-md items-center">
+              <View className="py-16 items-center">
                 <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
                 <Text className="text-red-600 font-semibold mt-4 text-center">Unable to load data</Text>
                 <Text className="text-sm text-gray-500 mt-2 text-center px-8">{error}</Text>
@@ -247,60 +199,19 @@ export default function DashboardScreen() {
                   <Text className="text-white text-sm font-medium">Retry</Text>
                 </TouchableOpacity>
               </View>
-            ) : (
-              <>
-                <Text className="text-lg font-semibold text-gray-900 mb-4">Your QR Code</Text>
-                <Text className="text-sm text-gray-600 mb-4 text-center">Show this to customers for tips</Text>
-                <Text className="text-xs text-gray-500 mb-4">Tap to enlarge for scanning</Text>
-                <TouchableOpacity onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowQRModal(true); }} activeOpacity={0.8}>
-                  <View ref={qrViewRef} collapsable={false} style={{ backgroundColor: '#ffffff', padding: 16, borderRadius: 16, borderWidth: 3, borderColor: '#5B94D3', width: 280, height: 280, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }}>
-                    {guardData?.qrCodeUrl ? (
-                      <>
-                        {qrImageLoading && <View style={{ position: 'absolute', justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color="#5B94D3" /></View>}
-                        {qrImageError ? (
-                          <View style={{ alignItems: 'center' }}>
-                            <Ionicons name="qr-code-outline" size={80} color="#ccc" />
-                            <Text style={{ color: '#999', fontSize: 12, fontFamily: 'Nunito-Regular', marginTop: 8, textAlign: 'center' }}>QR code not available</Text>
-                          </View>
-                        ) : (
-                          <Image source={{ uri: guardData.qrCodeUrl }} style={{ width: 240, height: 240 }} resizeMode="contain" onLoadStart={() => setQrImageLoading(true)} onLoadEnd={() => setQrImageLoading(false)} onError={() => { setQrImageLoading(false); setQrImageError(true); }} />
-                        )}
-                      </>
-                    ) : (
-                      <View style={{ alignItems: 'center' }}>
-                        <Ionicons name="qr-code-outline" size={80} color="#ccc" />
-                        <Text style={{ color: '#999', fontSize: 12, fontFamily: 'Nunito-Regular', marginTop: 8, textAlign: 'center' }}>No QR code available{'\n'}Contact your administrator</Text>
-                      </View>
-                    )}
-                  </View>
-                </TouchableOpacity>
-
-                <View className="items-center mt-4">
-                  <Text className="text-lg font-bold text-gray-900">{guardData?.fullName || authGuard?.phone || 'Guard'}</Text>
-                  <Text className="text-sm text-gray-500">ID: {guardData?.guardId || 'N/A'}</Text>
-                  <Text className="text-xs text-gray-400 mt-1">Scan to leave a tip</Text>
-                </View>
-                <View className="flex-row items-center mt-3 px-3 py-1 bg-green-50 rounded-full">
-                  <View className="w-2 h-2 bg-tippa-success rounded-full mr-2" />
-                  <Text className="text-xs text-green-700">{guardData?.status || 'Active'}</Text>
-                </View>
-              </>
-            )}
-
-            <TouchableOpacity onPress={downloadQRCode} disabled={downloadingQR} style={{ backgroundColor: downloadingQR ? '#F3F4F6' : '#5B94D3' }} className="flex-row items-center justify-center mt-4 px-4 py-3 rounded-xl">
-              {downloadingQR ? (
-                <View className="flex-row items-center">
-                  <Text className="text-tippa-secondary text-sm font-medium mr-2">Preparing...</Text>
-                  <View className="w-4 h-4 border-2 border-tippa-secondary border-t-transparent rounded-full animate-spin" />
-                </View>
-              ) : (
-                <View className="flex-row items-center">
-                  <Ionicons name="download-outline" size={18} color="#FFFFFF" />
-                  <Text className="text-white text-sm font-medium ml-2">Download for Printing</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
+            </View>
+          ) : (
+            <QrCodesCard
+              name={guardData?.fullName || authGuard?.phone || 'Guard'}
+              guardId={guardData?.guardId || ''}
+              siteName={guardData?.location?.name || null}
+              status={guardData?.status}
+              tipLink={tipLinkFor(guardData?.guardId, guardData?.tipLink)}
+              netcashQrUrl={guardData?.qrCodeUrl || null}
+              onOpenActivity={() => router.push('/tip-activity')}
+              onMessage={(type, title, message) => showAlert(type, title, message)}
+            />
+          )}
         </LinearGradient>
 
         {/* Tip Stats Card */}
@@ -326,6 +237,31 @@ export default function DashboardScreen() {
                 <Text className="text-xs text-blue-500 mt-1">This Week</Text>
               </View>
             </View>
+          </View>
+        </View>
+
+        {/* Recent tips from both lanyards, each explained */}
+        <View className="px-6 mt-6">
+          <View className="flex-row justify-between items-center mb-3">
+            <Text className="text-lg font-semibold text-gray-900">Recent tips</Text>
+            <TouchableOpacity onPress={() => router.push('/tip-activity')}>
+              <Text className="text-sm text-tippa-secondary">See all</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, elevation: 1 }}>
+            {(() => {
+              const recent = buildTipFeed(attempts, transactions).slice(0, 5);
+              if (!recent.length) {
+                return (
+                  <View style={{ padding: 20, alignItems: 'center' }}>
+                    <Ionicons name="qr-code-outline" size={26} color="#9CA3AF" />
+                    <Text style={{ fontSize: 13, fontFamily: 'Nunito-SemiBold', color: '#374151', marginTop: 6 }}>No tips yet</Text>
+                    <Text style={{ fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9CA3AF', marginTop: 2, textAlign: 'center' }}>When customers scan your QR codes, their tips show up here.</Text>
+                  </View>
+                );
+              }
+              return recent.map(item => <TipFeedRow key={item.key} item={item} compact />);
+            })()}
           </View>
         </View>
 
@@ -423,40 +359,6 @@ export default function DashboardScreen() {
           </View>
         </View>
       </ScrollView>
-
-      {/* Full Screen QR Modal */}
-      <Modal visible={showQRModal} animationType="fade" transparent={true} onRequestClose={() => setShowQRModal(false)}>
-        <View style={{ flex: 1, backgroundColor: '#ffffff', justifyContent: 'center', alignItems: 'center' }}>
-          <TouchableOpacity onPress={() => setShowQRModal(false)} style={{ position: 'absolute', top: 60, right: 20, zIndex: 10, backgroundColor: '#f3f4f6', borderRadius: 25, padding: 12 }}>
-            <Ionicons name="close" size={28} color="#374151" />
-          </TouchableOpacity>
-          <View style={{ position: 'absolute', top: 80, alignItems: 'center' }}>
-            <TippaLogo size={60} />
-            <Text style={{ fontSize: 18, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#111827', marginTop: 12 }}>Scan to Tip</Text>
-            <Text style={{ fontSize: 14, fontFamily: 'Nunito-Regular', color: '#6b7280', marginTop: 4 }}>{guardData?.fullName || authGuard?.phone || 'Guard'}</Text>
-          </View>
-          <View style={{ backgroundColor: '#ffffff', padding: 16, borderRadius: 24, borderWidth: 4, borderColor: '#5B94D3', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5 }}>
-            {guardData?.qrCodeUrl ? (
-              <Image source={{ uri: guardData.qrCodeUrl }} style={{ width: 320, height: 320 }} resizeMode="contain" />
-            ) : (
-              <View style={{ width: 320, height: 320, justifyContent: 'center', alignItems: 'center' }}>
-                <Ionicons name="qr-code-outline" size={120} color="#ccc" />
-                <Text style={{ color: '#999', fontSize: 14, fontFamily: 'Nunito-Regular', marginTop: 16, textAlign: 'center' }}>No QR code available</Text>
-              </View>
-            )}
-          </View>
-          <View style={{ position: 'absolute', bottom: 100, alignItems: 'center' }}>
-            <Text style={{ fontSize: 16, fontWeight: '600', fontFamily: 'Nunito-SemiBold', color: '#111827' }}>ID: {guardData?.guardId || 'N/A'}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, backgroundColor: '#dcfce7', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 }}>
-              <View style={{ width: 8, height: 8, backgroundColor: '#22c55e', borderRadius: 4, marginRight: 8 }} />
-              <Text style={{ fontSize: 14, fontFamily: 'Nunito-Regular', color: '#166534' }}>{guardData?.status || 'Active'}</Text>
-            </View>
-          </View>
-          <View style={{ position: 'absolute', bottom: 40, alignItems: 'center' }}>
-            <Text style={{ fontSize: 12, fontFamily: 'Nunito-Regular', color: '#9ca3af' }}>Point your camera at this QR code</Text>
-          </View>
-        </View>
-      </Modal>
 
       {/* Coming Soon Modal */}
       <Modal visible={showComingSoon} transparent animationType="fade" onRequestClose={() => setShowComingSoon(false)} statusBarTranslucent>

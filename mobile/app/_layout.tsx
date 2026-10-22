@@ -62,6 +62,10 @@ export default function RootLayout() {
                 name="notifications"
                 options={{ headerShown: false, presentation: 'card' }}
               />
+              <Stack.Screen
+                name="tip-activity"
+                options={{ headerShown: false, presentation: 'card' }}
+              />
             </Stack>
           </SafeAreaProvider>
         </NotificationProvider>

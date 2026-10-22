@@ -21,11 +21,22 @@ import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatDate } from '../../data/mockData';
 import { useGuard } from '../../contexts/GuardContext';
 import { getTransactions, Transaction } from '../../services/mobileApiService';
+import { CHANNEL_STYLE } from '../../src/lib/tips';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isFailed(tx: Transaction) {
   return tx.status === 'FAILED' || tx.status === 'REVERSED';
+}
+
+/** Netcash replied but the old system misread it: not a confirmed failure. */
+function isUnconfirmed(tx: Transaction) {
+  return tx.status === 'UNCONFIRMED';
+}
+
+/** Money that actually moved. Failed, unconfirmed and pending items never count. */
+function isCompleted(tx: Transaction) {
+  return (tx.status || 'COMPLETED') === 'COMPLETED';
 }
 
 // ── Animated spinner ─────────────────────────────────────────────────────────
@@ -79,6 +90,8 @@ function FailedBanner({ count }: { count: number }) {
 // ── Transaction row ───────────────────────────────────────────────────────────
 function TxRow({ item, index }: { item: Transaction; index: number }) {
   const failed = isFailed(item);
+  const unconfirmed = isUnconfirmed(item);
+  const channel = item.channel ? CHANNEL_STYLE[item.channel] : null;
 
   const iconMap: Record<string, { name: string; color: string }> = {
     TIP:         { name: 'cash',            color: '#10B981' },
@@ -89,11 +102,13 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
   const baseIcon = iconMap[item.type?.toUpperCase()] ?? { name: 'swap-horizontal', color: '#5B94D3' };
   const icon = failed
     ? { name: 'close-circle', color: '#EF4444' }
-    : baseIcon;
+    : unconfirmed
+      ? { name: 'help-circle', color: '#B45309' }
+      : baseIcon;
 
   const isIncome = item.amount > 0;
   const hasCommission = (item as any).metadata?.commissionAmount > 0;
-  const reason = item.failureReason || 'Payment didn\'t go through';
+  const reason = item.explanation || item.failureReason || 'Payment didn\'t go through';
   const pill = item.status === 'REVERSED' ? 'Reversed' : 'Failed';
 
   const metaParts = [
@@ -105,9 +120,9 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
   return (
     <Reanimated.View
       entering={FadeInDown.delay(index * 40).springify().damping(18)}
-      style={[hStyles.txRow, failed && hStyles.txRowFailed]}
+      style={[hStyles.txRow, failed && hStyles.txRowFailed, unconfirmed && hStyles.txRowUnconfirmed]}
     >
-      <View style={[hStyles.txIcon, { backgroundColor: failed ? '#FEE2E2' : icon.color + '20' }]}>
+      <View style={[hStyles.txIcon, { backgroundColor: failed ? '#FEE2E2' : unconfirmed ? '#FEF3C7' : icon.color + '20' }]}>
         <Ionicons name={icon.name as any} size={16} color={icon.color} />
       </View>
 
@@ -126,6 +141,17 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
                 <Text style={hStyles.failedBadgeText}>{pill}</Text>
               </View>
             )}
+            {unconfirmed && (
+              <View style={hStyles.unconfirmedBadge}>
+                <Text style={hStyles.unconfirmedBadgeText}>Unconfirmed</Text>
+              </View>
+            )}
+            {channel && (
+              <View style={[hStyles.channelBadge, { backgroundColor: channel.bg }]}>
+                <Ionicons name={channel.icon as any} size={9} color={channel.color} />
+                <Text style={[hStyles.channelBadgeText, { color: channel.color }]}>{channel.short}</Text>
+              </View>
+            )}
             {!failed && (item as any).isAutomatic && (
               <View style={hStyles.autoBadge}>
                 <Ionicons name="flash" size={9} color="#059669" />
@@ -133,7 +159,7 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
               </View>
             )}
           </View>
-          {failed ? (
+          {failed || unconfirmed ? (
             <Text style={hStyles.txAmountStruck}>
               {isIncome ? '+' : ''}{formatCurrency(Math.abs(item.amount))}
             </Text>
@@ -152,6 +178,19 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
           )}
         </View>
 
+        {/* unconfirmed: say plainly what it is */}
+        {unconfirmed && (
+          <View style={hStyles.unconfirmedBox}>
+            <Ionicons name="information-circle-outline" size={13} color="#B45309" style={{ marginTop: 1 }} />
+            <Text style={hStyles.unconfirmedText}>{item.explanation}</Text>
+          </View>
+        )}
+
+        {/* completed tips: how much reached the balance */}
+        {!failed && !unconfirmed && item.type?.toUpperCase() === 'TIP' && !!item.explanation && (
+          <Text style={hStyles.txExplain}>{item.explanation}</Text>
+        )}
+
         {/* failure reason callout */}
         {failed && (
           <View style={hStyles.reasonBox}>
@@ -163,7 +202,7 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
         {!failed && (item as any).reference && (
           <Text style={hStyles.txRef}>Ref: {(item as any).reference}</Text>
         )}
-        {!failed && hasCommission && (
+        {!failed && !unconfirmed && hasCommission && !item.explanation && (
           <View style={hStyles.commissionBadge}>
             <Text style={hStyles.commissionText}>
               {(item as any).metadata.commissionRate}% commission · received {formatCurrency((item as any).metadata.guardReceivesAmount)}
@@ -302,7 +341,7 @@ export default function HistoryScreen() {
   const filteredTransactions = transactions.filter(tx => {
     if (!isDateInPeriod(tx.date, selectedPeriod)) return false;
     switch (selectedFilter) {
-      case 'successful': return !isFailed(tx);
+      case 'successful': return isCompleted(tx);
       case 'failed':     return isFailed(tx);
       case 'tips':       return tx.type.toUpperCase() === 'TIP';
       case 'payouts':    return tx.type.toUpperCase() === 'PAYOUT';
@@ -310,8 +349,8 @@ export default function HistoryScreen() {
     }
   });
 
-  // Summary: only count completed transactions, never failed ones
-  const completedTxs = filteredTransactions.filter(tx => !isFailed(tx));
+  // Summary: only money that actually moved (not failed, unconfirmed or pending)
+  const completedTxs = filteredTransactions.filter(isCompleted);
   const income   = completedTxs.filter(t => t.type.toUpperCase() === 'TIP').reduce((s, t) => s + t.amount, 0);
   const expenses = completedTxs.filter(t => ['PAYOUT','AIRTIME','ELECTRICITY','VOUCHER'].includes(t.type.toUpperCase())).reduce((s, t) => s + Math.abs(t.amount), 0);
   const netAmount = income - expenses;
@@ -662,6 +701,8 @@ const hStyles = StyleSheet.create({
   // Transaction rows
   txRow:         { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
   txRowFailed:   { backgroundColor: '#FFF5F5' },
+  txRowUnconfirmed: { backgroundColor: '#FFFBEB' },
+  txExplain:     { fontSize: 12, fontFamily: 'Nunito-Regular', color: '#4B5563', marginTop: 4, lineHeight: 17 },
   txIcon:        { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
   txTopRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   txDesc:        { fontSize: 14, fontFamily: 'Nunito-SemiBold', color: '#111827', flex: 1 },
@@ -676,6 +717,12 @@ const hStyles = StyleSheet.create({
   autoBadge:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, gap: 3 },
   autoBadgeText: { fontSize: 10, fontFamily: 'Nunito-Bold', color: '#059669' },
   failedBadge:   { backgroundColor: '#FEE2E2', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  unconfirmedBadge:{ backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  unconfirmedBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#B45309', textTransform: 'uppercase', letterSpacing: 0.3 },
+  channelBadge:  { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  channelBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold' },
+  unconfirmedBox:{ flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, backgroundColor: '#FFFBEB', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#FDE68A' },
+  unconfirmedText:{ fontSize: 11, fontFamily: 'Nunito-Regular', color: '#92400E', flex: 1, lineHeight: 16 },
   failedBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#DC2626', textTransform: 'uppercase', letterSpacing: 0.3 },
 
   // Failure reason callout

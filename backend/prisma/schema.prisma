@@ -621,6 +621,10 @@ model Transaction {
   description       String?
   balance           Float?
   reference         String?
+  // Written by the admin server: why a tip failed, and the payment provider's own id
+  // (Netcash RequestTrace). Optional, so older records read fine.
+  failureReason     String?
+  externalRef       String?
   metadata          Json?
   createdAt         DateTime         @default(now())
 

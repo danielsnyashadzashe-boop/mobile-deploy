@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
 import { mobileAuth } from '../middleware/mobileAuth'
+import { loadTipActivity, channelOf, CHANNEL_LABEL, isMisreadFailure, sast, tipLinkFor } from '../lib/tipActivity'
 
 const router = Router()
 
@@ -925,7 +926,10 @@ router.get('/mobile/me', mobileAuth, async (req: Request, res: Response) => {
         status: guard.status,
         rating: guard.rating,
         qrCode: guard.qrCode,
+        // Manual QR: the Netcash code uploaded for this CTA (their original lanyard).
         qrCodeUrl: guard.qrCodeUrl || null,
+        // Auto QR: the Tippa link printed on new lanyards. Every scan is tracked.
+        tipLink: tipLinkFor(guard.guardId),
         location: guard.location || null,
         bankName: guard.bankName,
         accountNumber: guard.accountNumber,
@@ -961,12 +965,27 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
 
     const total = await prisma.transaction.count({ where })
 
+    // Which QR each tip came through. Tips from Tippa QR scans are matched to their
+    // attempt (same rules as the admin server), so even a tip that only arrived later
+    // through the Netcash statement is labelled Tippa QR when that is where it began.
+    const oldest = transactions.length ? transactions[transactions.length - 1].createdAt : new Date()
+    const me = await prisma.carGuard.findUnique({ where: { id: guardId }, select: { guardId: true } })
+    let tippaTipIds = new Set<string>()
+    if (me) {
+      try {
+        ;({ tippaTipIds } = await loadTipActivity(guardId, me.guardId, new Date(oldest.getTime() - 7 * 86400000)))
+      } catch (e) {
+        console.warn('tip activity unavailable for transaction labels:', (e as Error).message)
+      }
+    }
+
     return res.json({
       success: true,
       data: {
         transactions: transactions.map(t => {
-          const meta = (t.metadata as Record<string, unknown>) ?? {}
-          const status = t.status || 'COMPLETED'
+          const meta = (t.metadata as Record<string, any>) ?? {}
+          let status = t.status || 'COMPLETED'
+          const when = sast(t.createdAt) // South African time, not the server's UTC
           const row: Record<string, unknown> = {
             id: t.id,
             type: t.type,
@@ -975,14 +994,34 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
             status,
             reference: t.reference,
             balance: t.balance,
-            date: t.createdAt.toISOString().split('T')[0],
-            time: t.createdAt.toISOString().split('T')[1].split('.')[0],
+            date: when.date,
+            time: when.time,
             createdAt: t.createdAt.toISOString(),
             metadata: meta,
           }
-          if (status === 'FAILED' || status === 'REVERSED') {
-            row.failureReason = (meta.failureReason as string) || 'Payment didn\'t go through'
+          if (t.type === 'TIP') {
+            const channel = channelOf(t, tippaTipIds)
+            row.channel = channel
+            row.channelLabel = CHANNEL_LABEL[channel]
+          }
+          // The old admin code saved every Netcash reply as failed, whatever happened.
+          // These are not real failures: say so instead of showing "failed".
+          if (isMisreadFailure(t)) {
+            status = 'UNCONFIRMED'
+            row.status = status
+            // The same old code also divided the amount by 100 (R5.00 was saved as R0.05).
+            row.amount = +(t.amount * 100).toFixed(2)
+            row.explanation = 'Netcash replied, but our old system misread the reply. This is not a confirmed failure. If the money was paid, it is added from the Netcash statement as a separate tip.'
+          } else if (status === 'FAILED' || status === 'REVERSED') {
+            const why = String(t.failureReason || meta.failureReason || '').replace(/^Netcash did not accept the payment:?\s*/i, '')
+            row.failureReason = why || 'The payment did not go through'
+            row.explanation = `${why ? `The payment did not go through: ${why}.` : 'The payment did not go through.'} No money was taken from the customer and nothing was added to your balance.`
             row.paymentMethod = (meta.paymentMethod as string) || null
+          } else if (t.type === 'TIP' && status === 'COMPLETED') {
+            const fee = Number(meta.commissionAmount || 0)
+            row.explanation = fee > 0
+              ? `Customer tipped R${Number(meta.originalAmount ?? t.amount + fee).toFixed(2)}. R${fee.toFixed(2)} fee, R${t.amount.toFixed(2)} added to your balance.`
+              : `R${t.amount.toFixed(2)} added to your balance.`
           }
           return row
         }),
@@ -997,6 +1036,54 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
   } catch (error) {
     console.error('❌ Error fetching transactions:', error)
     return res.status(500).json({ success: false, error: 'Failed to fetch transactions' })
+  }
+})
+
+/**
+ * GET /api/mobile/me/tip-activity?days=30
+ * Every Tippa QR tip attempt for the logged-in CTA: completed, waiting, failed, not
+ * finished or left, each with a plain explanation and its steps. Also totals per QR
+ * (Tippa QR and Netcash QR) so the CTA sees both lanyards side by side.
+ */
+router.get('/mobile/me/tip-activity', mobileAuth, async (req: Request, res: Response) => {
+  try {
+    const guardId = req.guard!.guardId
+    const days = Math.min(90, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30))
+    const since = new Date(Date.now() - days * 86400000)
+    const me = await prisma.carGuard.findUnique({ where: { id: guardId }, select: { guardId: true, qrCodeUrl: true } })
+    if (!me) return res.status(404).json({ success: false, error: 'Guard not found' })
+
+    const { attempts, tips, tippaTipIds } = await loadTipActivity(guardId, me.guardId, since)
+
+    const completedTips = tips.filter(t => t.status === 'COMPLETED')
+    const byChannel = { TIPPA_QR: { count: 0, received: 0 }, NETCASH_QR: { count: 0, received: 0 }, OTHER: { count: 0, received: 0 } }
+    for (const t of completedTips) {
+      const c = byChannel[channelOf(t, tippaTipIds)]
+      c.count++
+      c.received += Number(t.amount || 0)
+    }
+    const count = (s: string) => attempts.filter(a => a.status === s).length
+
+    return res.json({
+      success: true,
+      data: {
+        days,
+        tipLink: tipLinkFor(me.guardId),
+        hasNetcashQr: !!me.qrCodeUrl,
+        summary: {
+          attempts: attempts.length,
+          paid: count('SUCCESS'),
+          waiting: count('PENDING') + count('IN_PROGRESS'),
+          notCompleted: count('FAILED') + count('INCOMPLETE') + count('ABANDONED'),
+          failed: count('FAILED'),
+        },
+        byChannel: Object.fromEntries(Object.entries(byChannel).map(([k, v]) => [k, { count: v.count, received: +v.received.toFixed(2) }])),
+        attempts: attempts.slice(0, 100),
+      },
+    })
+  } catch (error) {
+    console.error('❌ Error fetching tip activity:', error)
+    return res.status(500).json({ success: false, error: 'Failed to fetch tip activity' })
   }
 })
 

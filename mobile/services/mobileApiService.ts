@@ -67,6 +67,39 @@ export interface Transaction {
   failureReason?: string;
   paymentMethod?: string | null;
   metadata?: Record<string, unknown> | null;
+  /** Tips only: which QR the tip came through. */
+  channel?: TipChannel;
+  channelLabel?: string;
+  /** Plain explanation of what happened, written for the CTA. */
+  explanation?: string;
+}
+
+export type TipChannel = 'TIPPA_QR' | 'NETCASH_QR' | 'OTHER';
+export type AttemptStatus = 'SUCCESS' | 'PENDING' | 'FAILED' | 'INCOMPLETE' | 'ABANDONED' | 'IN_PROGRESS';
+
+/** One Tippa QR tip attempt: a customer scanned the CTA's Tippa QR. */
+export interface TipAttempt {
+  id: string;
+  status: AttemptStatus;
+  statusLabel: string;
+  explanation: string;
+  amount: number | null;
+  received: number | null;
+  reference: string | null;
+  startedAt: string;
+  updatedAt: string;
+  paidAt: string | null;
+  secondsToPay: number | null;
+  steps: { at: string; kind: string; amount: string | null }[];
+}
+
+export interface TipActivity {
+  days: number;
+  tipLink: string;
+  hasNetcashQr: boolean;
+  summary: { attempts: number; paid: number; waiting: number; notCompleted: number; failed: number };
+  byChannel: Record<TipChannel, { count: number; received: number }>;
+  attempts: TipAttempt[];
 }
 
 export interface Payout {
@@ -791,6 +824,26 @@ export async function updateMyProfile(
   }
 }
 
+/**
+ * Tippa QR tip attempts (paid, waiting, failed, not finished, left) with explanations,
+ * and completed tips per QR (Tippa QR and Netcash QR).
+ */
+export async function getTipActivity(token: string, days = 30): Promise<ApiResponse<TipActivity>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mobile/me/tip-activity?days=${days}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to fetch tip activity' };
+    }
+    return result;
+  } catch (error) {
+    console.error('Error fetching tip activity:', error);
+    return { success: false, error: 'Failed to fetch tip activity' };
+  }
+}
+
 export async function getAutoPayoutSettings(token: string): Promise<ApiResponse<AutoPayoutSettings>> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/mobile/me/auto-payout-settings`, {
@@ -827,5 +880,6 @@ export default {
   getMyPayouts,
   submitPayoutRequest,
   getAutoPayoutSettings,
+  getTipActivity,
   NETWORK_CODES,
 };

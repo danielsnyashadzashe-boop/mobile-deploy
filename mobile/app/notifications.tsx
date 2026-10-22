@@ -25,6 +25,11 @@ const TYPE_CONFIG: Record<string, {
   PAYOUT_REJECTED: { icon: 'close-circle',     color: '#EF4444', bg: '#FEF2F2', label: 'Payout Rejected' },
   PAYOUT_SENT:     { icon: 'paper-plane',       color: '#5B94D3', bg: '#EFF6FF', label: 'Payout Sent'     },
   TIP_RECEIVED:    { icon: 'cash',              color: '#F59E0B', bg: '#FFFBEB', label: 'Tip Received'    },
+  // Sent for every Tippa QR tip, so the CTA knows what happened to each one.
+  TIP_STARTED:       { icon: 'time',            color: '#3B82F6', bg: '#EFF6FF', label: 'Tip Started'       },
+  TIP_FAILED:        { icon: 'close-circle',    color: '#EF4444', bg: '#FEF2F2', label: 'Tip Failed'        },
+  TIP_NOT_COMPLETED: { icon: 'return-down-back', color: '#6B7280', bg: '#F3F4F6', label: 'Tip Not Completed' },
+  TIP_UPDATE:        { icon: 'refresh-circle',  color: '#B45309', bg: '#FEF3C7', label: 'Tip Update'        },
   ADMIN_MESSAGE:   { icon: 'megaphone',         color: '#8B5CF6', bg: '#F5F3FF', label: 'Message'         },
   DEFAULT:         { icon: 'notifications',     color: '#6B7280', bg: '#F3F4F6', label: 'Notification'    },
 };
