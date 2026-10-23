@@ -20,7 +20,7 @@ import { useLiveRefresh } from '../src/lib/useLiveRefresh';
 const PERIODS = [7, 30, 90];
 const FILTERS = [
   { key: 'all', label: 'All' },
-  { key: 'paid', label: 'Paid' },
+  { key: 'paid', label: 'Confirmed' },
   { key: 'pending', label: 'Pending' },
   { key: 'not', label: 'Not completed' },
   { key: 'failed', label: 'Failed' },
@@ -63,7 +63,7 @@ export default function TipActivityScreen() {
   // Filters and counts go by the label, so tips from both QR codes are grouped the same way.
   const shown = useMemo(() => feed.filter(i => {
     const label = STATUS_STYLE[i.status].label;
-    if (filter === 'paid') return label === 'Paid';
+    if (filter === 'paid') return label === 'Confirmed';
     if (filter === 'pending') return label === 'Pending';
     if (filter === 'not') return label === 'Not completed';
     if (filter === 'failed') return label === 'Failed';
@@ -90,7 +90,7 @@ export default function TipActivityScreen() {
 
         <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 16, padding: 14, marginTop: 16 }}>
           {[
-            { label: 'Paid', value: count('Paid'), color: '#6EE7B7' },
+            { label: 'Confirmed', value: count('Confirmed'), color: '#6EE7B7' },
             { label: 'Pending', value: count('Pending'), color: '#BFDBFE' },
             { label: 'Not completed', value: count('Not completed'), color: '#FDE68A' },
             { label: 'Failed', value: count('Failed'), color: '#FCA5A5' },

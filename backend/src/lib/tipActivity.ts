@@ -23,6 +23,7 @@ const QR_TEST_ENTITY = 'NetcashQrTest'
 const NETCASH_TIMEOUT_MS = 15 * 60 * 1000 // no word from Netcash this long after Pay -> abandoned
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000 // tip page untouched this long without Pay -> abandoned
 const MISREAD = /result code: undefined/ // old admin code saved every Netcash reply as failed
+const RETRY_WINDOW_MS = 30 * 60 * 1000 // a try this close before a confirmed one, on the same phone, is the same customer
 
 export const LIVE_SITE = process.env.PUBLIC_TIP_BASE_URL || 'https://www.tippapaymentsolutions.com'
 export const tipLinkFor = (guardPublicId: string) => `${LIVE_SITE.replace(/\/$/, '')}/t/${encodeURIComponent(guardPublicId)}`
@@ -67,14 +68,18 @@ function summarise(allEvents: AttemptEvent[], tips: TipRow[], now: number, claim
     const paid = (t: TipRow) => Number(t.metadata?.originalAmount ?? t.amount)
     const byRef = tips.filter(carriesRef)
     const refCompleted = byRef.find(t => t.status === 'COMPLETED')
-    const byAmount = refCompleted ? null : [...tips].reverse().find(t => {
+    const candidates = refCompleted ? [] : [...tips].reverse().filter(t => {
       const at = t.createdAt.getTime()
       return t.status === 'COMPLETED' && !claimed.has(t.id) && at >= payAt && at - payAt <= 7 * 86400000 && Math.abs(paid(t) - parseFloat(pay.amount || '0')) < 0.005
     })
+    // Confirmed needs two proofs: the money is on the CTA's balance (a completed tip) AND
+    // it is this payment's: it carries this reference, or Netcash approved this payment,
+    // or it is the only credit of that amount since Pay so it cannot be another tip.
+    const byAmount = candidates.length && (last('NETCASH_ACCEPTED') || candidates.length === 1) ? candidates[0] : null
     const done = refCompleted || byAmount
     if (done) {
       claimed.add(done.id)
-      return { ...base, tip: done, status: 'SUCCESS' as AttemptStatus, reason: 'Paid' }
+      return { ...base, tip: done, status: 'SUCCESS' as AttemptStatus, reason: 'Confirmed' }
     }
     const other = byRef[0]
     if (other) {
@@ -115,7 +120,7 @@ function explain(status: AttemptStatus, a: { amount: string | null; reason: stri
     case 'SUCCESS': {
       const got = a.tip?.metadata?.guardReceivesAmount ?? a.tip?.amount
       const fee = Number(a.tip?.metadata?.commissionAmount || 0)
-      return fee > 0 ? `Paid. ${rand(got)} was added to your balance (${rand(a.amount)} tip less ${rand(fee)} fee).` : `Paid. ${rand(got ?? a.amount)} was added to your balance.`
+      return fee > 0 ? `Confirmed. ${rand(got)} is on your balance (${rand(a.amount)} tip less ${rand(fee)} fee).` : `Confirmed. ${rand(got ?? a.amount)} is on your balance.`
     }
     case 'PENDING':
       return a.reason === 'Paying on Netcash now'
@@ -126,6 +131,7 @@ function explain(status: AttemptStatus, a: { amount: string | null; reason: stri
     case 'INCOMPLETE':
       return `The customer went to the payment page for ${amt} but came back without paying. No money was taken.`
     case 'ABANDONED':
+      if (a.reason === RETRIED) return `The customer tried again and that later tip was confirmed. This ${amt === 'a' ? '' : amt + ' '}try was not completed and no money was taken for it.`
       return a.paid
         ? `The customer started paying ${amt} but did not finish. No money was taken.`
         : `A customer opened your tip page${a.amount ? ` and chose ${amt}` : ''} but left without paying. No money was taken.`
@@ -135,7 +141,26 @@ function explain(status: AttemptStatus, a: { amount: string | null; reason: stri
 }
 
 export const STATUS_LABEL: Record<AttemptStatus, string> = {
-  SUCCESS: 'Paid', PENDING: 'Waiting', FAILED: 'Failed', INCOMPLETE: 'Not finished', ABANDONED: 'Left', IN_PROGRESS: 'In progress',
+  SUCCESS: 'Confirmed', PENDING: 'Pending', FAILED: 'Failed', INCOMPLETE: 'Not completed', ABANDONED: 'Not completed', IN_PROGRESS: 'Pending',
+}
+
+const RETRIED = 'Customer tried again and the later tip was confirmed'
+
+/**
+ * One customer, several tries: once a try is confirmed, the same phone's earlier
+ * unfinished tries (within 30 minutes) are concluded as not completed. Tries Netcash
+ * approved or declined keep their own outcome, as money may still arrive for them.
+ */
+function concludeRetries<T extends { status: AttemptStatus; reason: string; device: string | null; startedAt: number; lastAt: number; accepted: boolean }>(list: T[]) {
+  for (const done of list.filter(a => a.status === 'SUCCESS' && a.device)) {
+    for (const o of list) {
+      if (o === done || o.device !== done.device || o.accepted) continue
+      if (!['PENDING', 'IN_PROGRESS', 'INCOMPLETE', 'ABANDONED'].includes(o.status)) continue
+      if (o.startedAt > done.startedAt || done.startedAt - o.lastAt > RETRY_WINDOW_MS) continue
+      o.status = 'ABANDONED'
+      o.reason = RETRIED
+    }
+  }
 }
 
 async function tipsFor(guardMongoId: string, since: Date): Promise<TipRow[]> {
@@ -163,10 +188,24 @@ export async function loadTipActivity(guardMongoId: string, guardPublicId: strin
   const payAt = (ev: AttemptEvent[]) => { const p = ev.filter(e => e.kind === 'PAY_PRESSED').pop(); return p ? p.at.getTime() : Infinity }
 
   const tippaTipIds = new Set<string>()
-  const attempts = [...byAttempt.entries()]
+  const summed = [...byAttempt.entries()]
     .sort((x, y) => payAt(x[1]) - payAt(y[1]))
     .map(([id, ev]) => {
       const s = summarise(ev, tips, now, claimed)
+      const phone = ev.filter(e => e.kind !== 'CTA_NOTIFIED')
+      return {
+        id, ev, ...s,
+        device: ev.find(e => e.device)?.device || null,
+        startedAt: (phone[0]?.at || ev[0].at).getTime(),
+        lastAt: (phone[phone.length - 1]?.at || ev[ev.length - 1].at).getTime(),
+        accepted: ev.some(e => e.kind === 'NETCASH_ACCEPTED' || e.kind === 'NETCASH_DECLINED'),
+      }
+    })
+  concludeRetries(summed)
+
+  const attempts = summed
+    .map(s => {
+      const { id, ev } = s
       if (s.tip && s.status === 'SUCCESS') tippaTipIds.add(s.tip.id)
       const paid = ev.some(e => e.kind === 'PAY_PRESSED')
       const phone = ev.filter(e => e.kind !== 'CTA_NOTIFIED')

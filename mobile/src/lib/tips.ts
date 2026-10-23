@@ -21,7 +21,7 @@ export function tipLinkFor(guardPublicId?: string | null, fromServer?: string | 
 export type FeedStatus = AttemptStatus | 'UNCONFIRMED';
 
 export const STATUS_STYLE: Record<FeedStatus, { label: string; color: string; bg: string; icon: string }> = {
-  SUCCESS: { label: 'Paid', color: '#047857', bg: '#D1FAE5', icon: 'checkmark-circle' },
+  SUCCESS: { label: 'Confirmed', color: '#047857', bg: '#D1FAE5', icon: 'checkmark-circle' },
   PENDING: { label: 'Pending', color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' },
   IN_PROGRESS: { label: 'Pending', color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' },
   INCOMPLETE: { label: 'Not completed', color: '#B45309', bg: '#FEF3C7', icon: 'return-down-back' },
@@ -38,9 +38,9 @@ export const CHANNEL_STYLE: Record<TipChannel, { label: string; short: string; c
 
 /** What each label means, shown in the app so nothing is a mystery. */
 export const STATUS_HELP: { status: FeedStatus; text: string }[] = [
-  { status: 'SUCCESS', text: 'The customer paid. The money is on your balance.' },
+  { status: 'SUCCESS', text: 'The money is on your balance. Checked twice: it was credited to you, and it is matched to this payment by its reference or by Netcash.' },
   { status: 'PENDING', text: 'The customer paid or is paying. Netcash has not confirmed yet. It updates by itself within 15 minutes.' },
-  { status: 'INCOMPLETE', text: 'The customer started a tip but did not pay. No money was taken. The reason is shown on the tip.' },
+  { status: 'INCOMPLETE', text: 'The customer started a tip but did not pay. No money was taken. If they tried again and paid, the earlier try shows here and the paid one shows as Confirmed.' },
   { status: 'FAILED', text: 'The payment was tried but did not go through, for example declined by the bank. The reason is shown on the tip.' },
 ];
 

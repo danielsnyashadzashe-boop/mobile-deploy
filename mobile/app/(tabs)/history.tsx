@@ -179,6 +179,12 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
                 <Text style={hStyles.failedBadgeText}>{pill}</Text>
               </View>
             )}
+            {item.status === 'COMPLETED' && item.type?.toUpperCase() === 'TIP' && (
+              <View style={hStyles.confirmedBadge}>
+                <Ionicons name="checkmark-circle" size={9} color="#047857" />
+                <Text style={hStyles.confirmedBadgeText}>Confirmed</Text>
+              </View>
+            )}
             {pending && (
               <View style={hStyles.pendingBadge}>
                 <Text style={hStyles.pendingBadgeText}>Pending</Text>
@@ -780,6 +786,8 @@ const hStyles = StyleSheet.create({
   failedBadge:   { backgroundColor: '#FEE2E2', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   unconfirmedBadge:{ backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   noAmount:      { fontSize: 12, fontFamily: 'Nunito-SemiBold', color: '#9CA3AF' },
+  confirmedBadge:{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#D1FAE5', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  confirmedBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#047857', textTransform: 'uppercase', letterSpacing: 0.3 },
   pendingBadge:  { backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   pendingBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: 0.3 },
   pendingBox:    { flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, backgroundColor: '#EFF6FF', borderRadius: 8, padding: 8 },
