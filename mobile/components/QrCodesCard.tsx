@@ -54,6 +54,9 @@ const COPY: Record<Which, { title: string; tag: string; how: string; when: strin
 
 export function QrCodesCard({ name, guardId, siteName, status, tipLink, netcashQrUrl, onOpenActivity, onMessage }: Props) {
   const { width: screenW } = useWindowDimensions();
+  // CTAs with a Netcash QR have both codes; everyone else has only the Tippa QR,
+  // which the system makes for them, so there is nothing to switch between.
+  const hasBoth = !!netcashQrUrl && !!tipLink;
   const [which, setWhich] = useState<Which>(tipLink ? 'tippa' : 'netcash');
   const [fullScreen, setFullScreen] = useState(false);
   const [lanyardOpen, setLanyardOpen] = useState(false);
@@ -123,10 +126,12 @@ export function QrCodesCard({ name, guardId, siteName, status, tipLink, netcashQ
           <Text style={{ fontSize: 11, fontFamily: 'Nunito-SemiBold', color: '#047857' }}>{status === 'ACTIVE' || !status ? 'Active' : status}</Text>
         </View>
       </View>
-      <Text style={{ fontSize: 12, fontFamily: 'Nunito-Regular', color: '#6B7280', marginTop: 2 }}>Both pay into the same balance. Customers can use either one.</Text>
+      <Text style={{ fontSize: 12, fontFamily: 'Nunito-Regular', color: '#6B7280', marginTop: 2 }}>
+        {hasBoth ? 'Both pay into the same balance. Customers can use either one.' : 'Customers scan this code to tip you. The money goes to your balance.'}
+      </Text>
 
-      {/* Toggle */}
-      <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 4, marginTop: 14 }}>
+      {/* Toggle, only when there are two codes */}
+      {hasBoth && <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 4, marginTop: 14 }}>
         {(['tippa', 'netcash'] as Which[]).map(w => {
           const on = which === w;
           return (
@@ -137,7 +142,7 @@ export function QrCodesCard({ name, guardId, siteName, status, tipLink, netcashQ
             </TouchableOpacity>
           );
         })}
-      </View>
+      </View>}
 
       {/* The code */}
       <TouchableOpacity activeOpacity={0.85} disabled={!available} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setFullScreen(true); }}
