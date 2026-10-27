@@ -34,19 +34,19 @@ function attemptToRow(a: TipAttempt): Transaction {
   const status = a.status === 'FAILED' ? 'FAILED'
     : a.status === 'PENDING' || a.status === 'IN_PROGRESS' ? 'PENDING'
     : 'NOT_COMPLETED';
-  const at = new Date(a.updatedAt);
+  const at = new Date(a.startedAt); // when the customer tried
   return {
     id: `attempt-${a.id}`,
     type: 'TIP',
     amount: a.amount ?? 0,
     noAmount: a.amount == null,
-    description: status === 'FAILED' ? 'Tip failed' : status === 'PENDING' ? 'Tip pending' : 'Tip not completed',
+    description: status === 'FAILED' ? 'Tip failed' : status === 'PENDING' ? 'Tip pending · not money yet' : 'Tip not paid',
     status,
     reference: a.reference,
     balance: null,
     date: localDay(at),
     time: at.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
-    createdAt: a.updatedAt,
+    createdAt: a.startedAt,
     failureReason: a.statusLabel,
     channel: 'TIPPA_QR',
     channelLabel: 'Tippa QR',
@@ -276,6 +276,9 @@ export default function HistoryScreen() {
   const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState<string | null>(null);
   const [transactions, setTransactions]     = useState<Transaction[]>([]);
+  // Set when the unfinished/failed tips could not be loaded, so the list is not
+  // mistaken for complete.
+  const [attemptsError, setAttemptsError]   = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [selectedPeriod, setSelectedPeriod] = useState('All Time');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
@@ -316,6 +319,7 @@ export default function HistoryScreen() {
       // Tippa QR attempts that did not complete, for the last 90 days.
       const activity = await getTipActivity(token, 90);
       const attempts = activity.success ? (activity.data?.attempts || []) : [];
+      setAttemptsError(activity.success ? null : (activity.error || 'Could not load unfinished tips.'));
       const unfinished = attempts.filter(a => a.status !== 'SUCCESS');
       // The attempt row is the accurate one: drop old transaction rows for the same
       // attempt (the "unconfirmed" records the old system wrote).
@@ -410,6 +414,7 @@ export default function HistoryScreen() {
     switch (selectedFilter) {
       case 'successful': return isCompleted(tx);
       case 'failed':     return isFailed(tx);
+      case 'pending':    return isPending(tx) || isUnconfirmed(tx);
       case 'tips':       return tx.type.toUpperCase() === 'TIP';
       case 'payouts':    return tx.type.toUpperCase() === 'PAYOUT';
       default:           return true;
@@ -424,6 +429,7 @@ export default function HistoryScreen() {
 
   // Failed count across full unfiltered list (for banner + badge)
   const totalFailedCount = transactions.filter(isFailed).length;
+  const totalPendingCount = transactions.filter(t => isPending(t) || isUnconfirmed(t)).length;
 
   const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
   const paginatedTransactions = filteredTransactions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -445,7 +451,8 @@ export default function HistoryScreen() {
   const filterChips = [
     { key: 'all',        label: 'All' },
     { key: 'successful', label: 'Successful' },
-    { key: 'failed',     label: 'Failed', badge: totalFailedCount > 0 ? totalFailedCount : undefined, danger: true },
+    { key: 'failed',     label: 'Not paid', badge: totalFailedCount > 0 ? totalFailedCount : undefined, danger: true },
+    { key: 'pending',    label: 'Pending', badge: totalPendingCount > 0 ? totalPendingCount : undefined },
     { key: 'tips',       label: 'Tips' },
     { key: 'payouts',    label: 'Payouts' },
   ];
@@ -453,6 +460,14 @@ export default function HistoryScreen() {
   // ── List header ─────────────────────────────────────────────────────────────
   const ListHeader = () => (
     <>
+      {attemptsError && (
+        <View style={hStyles.attemptsErrorBox}>
+          <Ionicons name="cloud-offline-outline" size={16} color="#B45309" style={{ marginTop: 1 }} />
+          <Text style={hStyles.attemptsErrorText}>
+            Unpaid and failed tips could not be loaded right now, so only completed payments are listed. {attemptsError} Pull down to try again.
+          </Text>
+        </View>
+      )}
       {totalFailedCount > 0 && selectedFilter !== 'failed' && (
         <FailedBanner count={totalFailedCount} />
       )}
@@ -461,7 +476,9 @@ export default function HistoryScreen() {
 
   // ── Empty state label ────────────────────────────────────────────────────────
   const emptyLabel = selectedFilter === 'failed'
-    ? 'No failed payments. All good!'
+    ? (attemptsError ? 'Unpaid tips could not be loaded. Pull down to try again.' : 'No unpaid or failed tips. All good!')
+    : selectedFilter === 'pending'
+    ? 'Nothing waiting for payment.'
     : `No ${selectedFilter !== 'all' ? selectedFilter + ' ' : ''}transactions for ${selectedPeriod}.`;
 
   return (
@@ -541,7 +558,7 @@ export default function HistoryScreen() {
                   {f.label}
                 </Text>
                 {f.badge != null && (
-                  <View style={[hStyles.pillBadge, active && { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
+                  <View style={[hStyles.pillBadge, !isDanger && { backgroundColor: '#2563EB' }, active && { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
                     <Text style={hStyles.pillBadgeText}>{f.badge}</Text>
                   </View>
                 )}
@@ -753,7 +770,7 @@ const hStyles = StyleSheet.create({
   dropdownTextActive: { color: '#5B94D3', fontFamily: 'Nunito-SemiBold' },
 
   // Pills
-  pillRow:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 12, paddingBottom: 12, paddingTop: 4, gap: 6, flexWrap: 'nowrap' },
+  pillRow:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 12, paddingBottom: 12, paddingTop: 4, gap: 6, rowGap: 8, flexWrap: 'wrap' },
   pill:              { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: '#F3F4F6' },
   pillActive:        { backgroundColor: '#5B94D3' },
   pillActiveDanger:  { backgroundColor: '#DC2626' },
@@ -788,6 +805,8 @@ const hStyles = StyleSheet.create({
   noAmount:      { fontSize: 12, fontFamily: 'Nunito-SemiBold', color: '#9CA3AF' },
   confirmedBadge:{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#D1FAE5', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   confirmedBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#047857', textTransform: 'uppercase', letterSpacing: 0.3 },
+  attemptsErrorBox:  { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginTop: 10, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 12, padding: 10 },
+  attemptsErrorText: { flex: 1, fontSize: 12, fontFamily: 'Nunito-Regular', color: '#92400E', lineHeight: 17 },
   pendingBadge:  { backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   pendingBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: 0.3 },
   pendingBox:    { flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, backgroundColor: '#EFF6FF', borderRadius: 8, padding: 8 },

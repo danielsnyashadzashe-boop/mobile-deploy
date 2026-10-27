@@ -39,7 +39,7 @@ export const CHANNEL_STYLE: Record<TipChannel, { label: string; short: string; c
 /** What each label means, shown in the app so nothing is a mystery. */
 export const STATUS_HELP: { status: FeedStatus; text: string }[] = [
   { status: 'SUCCESS', text: 'The money is on your balance. Checked twice: it was credited to you, and it is matched to this payment by its reference or by Netcash.' },
-  { status: 'PENDING', text: 'The customer paid or is paying. Netcash has not confirmed yet. It updates by itself within 15 minutes.' },
+  { status: 'PENDING', text: 'Not money yet. The customer went to pay but has not approved it in their banking app or on Netcash, or Netcash has not confirmed it. It updates by itself within 15 minutes.' },
   { status: 'INCOMPLETE', text: 'The customer started a tip but did not pay. No money was taken. If they tried again and paid, the earlier try shows here and the paid one shows as Confirmed.' },
   { status: 'FAILED', text: 'The payment was tried but did not go through, for example declined by the bank. The reason is shown on the tip.' },
 ];
@@ -64,7 +64,7 @@ export interface FeedItem {
 export function buildTipFeed(attempts: TipAttempt[], transactions: Transaction[]): FeedItem[] {
   const feed: FeedItem[] = attempts.map(a => ({
     key: `a-${a.id}`,
-    at: a.status === 'SUCCESS' && a.paidAt ? a.paidAt : a.updatedAt,
+    at: a.status === 'SUCCESS' && a.paidAt ? a.paidAt : a.startedAt,
     channel: 'TIPPA_QR',
     status: a.status,
     amount: a.amount,

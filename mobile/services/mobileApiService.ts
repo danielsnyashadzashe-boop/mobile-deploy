@@ -834,14 +834,17 @@ export async function getTipActivity(token: string, days = 30): Promise<ApiRespo
     const response = await fetch(`${API_BASE_URL}/api/mobile/me/tip-activity?days=${days}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const result = await response.json();
+    const result = await response.json().catch(() => ({}));
+    if (response.status === 404) {
+      return { success: false, error: 'Tip status is not available yet: the server is being updated. Paid tips still show in History.' };
+    }
     if (!response.ok || !result.success) {
-      return { success: false, error: result.error || 'Failed to fetch tip activity' };
+      return { success: false, error: result.error || 'Could not load tip status. Check your connection and try again.' };
     }
     return result;
   } catch (error) {
     console.error('Error fetching tip activity:', error);
-    return { success: false, error: 'Failed to fetch tip activity' };
+    return { success: false, error: 'Could not load tip status. Check your connection and try again.' };
   }
 }
 

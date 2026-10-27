@@ -24,12 +24,13 @@ const TYPE_CONFIG: Record<string, {
   PAYOUT_APPROVED: { icon: 'checkmark-circle', color: '#10B981', bg: '#ECFDF5', label: 'Payout Approved' },
   PAYOUT_REJECTED: { icon: 'close-circle',     color: '#EF4444', bg: '#FEF2F2', label: 'Payout Rejected' },
   PAYOUT_SENT:     { icon: 'paper-plane',       color: '#5B94D3', bg: '#EFF6FF', label: 'Payout Sent'     },
-  TIP_RECEIVED:    { icon: 'cash',              color: '#F59E0B', bg: '#FFFBEB', label: 'Tip Received'    },
-  // Sent for every Tippa QR tip, so the CTA knows what happened to each one.
-  TIP_STARTED:       { icon: 'time',            color: '#3B82F6', bg: '#EFF6FF', label: 'Tip Started'       },
-  TIP_FAILED:        { icon: 'close-circle',    color: '#EF4444', bg: '#FEF2F2', label: 'Tip Failed'        },
-  TIP_NOT_COMPLETED: { icon: 'return-down-back', color: '#6B7280', bg: '#F3F4F6', label: 'Tip Not Completed' },
-  TIP_UPDATE:        { icon: 'refresh-circle',  color: '#B45309', bg: '#FEF3C7', label: 'Tip Update'        },
+  TIP_RECEIVED:    { icon: 'checkmark-circle',  color: '#059669', bg: '#ECFDF5', label: 'Tip confirmed · money on your balance' },
+  // Sent for every Tippa QR tip, so the CTA knows what happened to each one. A
+  // "waiting" message is never money: the customer still has to approve the payment.
+  TIP_STARTED:       { icon: 'time',            color: '#3B82F6', bg: '#EFF6FF', label: 'Waiting for payment · not money yet' },
+  TIP_FAILED:        { icon: 'close-circle',    color: '#EF4444', bg: '#FEF2F2', label: 'Payment failed · no money' },
+  TIP_NOT_COMPLETED: { icon: 'return-down-back', color: '#6B7280', bg: '#F3F4F6', label: 'Not paid · no money' },
+  TIP_UPDATE:        { icon: 'refresh-circle',  color: '#B45309', bg: '#FEF3C7', label: 'Tip update'        },
   ADMIN_MESSAGE:   { icon: 'megaphone',         color: '#8B5CF6', bg: '#F5F3FF', label: 'Message'         },
   DEFAULT:         { icon: 'notifications',     color: '#6B7280', bg: '#F3F4F6', label: 'Notification'    },
 };
@@ -53,8 +54,21 @@ function timeAgo(iso: string): string {
 
 // ─── notification row ────────────────────────────────────────────────────────
 
-function NotifRow({ item, last }: { item: AppNotification; last?: boolean }) {
+/** What finally happened to a tip, shown on its "waiting for payment" message. */
+const OUTCOME: Record<string, { text: string; color: string; bg: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  TIP_RECEIVED:      { text: 'Now: confirmed, money on your balance', color: '#047857', bg: '#D1FAE5', icon: 'checkmark-circle' },
+  TIP_NOT_COMPLETED: { text: 'Now: not paid, no money received',      color: '#4B5563', bg: '#F3F4F6', icon: 'return-down-back' },
+  TIP_FAILED:        { text: 'Now: payment failed, no money',          color: '#B91C1C', bg: '#FEE2E2', icon: 'close-circle' },
+  WAITING:           { text: 'Still waiting: not money yet',           color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' },
+};
+
+/** Older messages said "Tip started", which read like money arrived. */
+const clearTitle = (item: AppNotification) =>
+  item.type === 'TIP_STARTED' ? item.title.replace(/^Tip started/i, 'Waiting for payment') : item.title;
+
+function NotifRow({ item, last, outcome }: { item: AppNotification; last?: boolean; outcome?: string }) {
   const c = cfg(item.type);
+  const o = item.type === 'TIP_STARTED' ? OUTCOME[outcome || 'WAITING'] || OUTCOME.WAITING : null;
   const timestamp = (item.metadata?.eventAt as string | undefined) ?? item.createdAt;
   return (
     <View style={[s.row, !last && s.rowBorder, !item.read && s.rowUnread]}>
@@ -69,11 +83,17 @@ function NotifRow({ item, last }: { item: AppNotification; last?: boolean }) {
       {/* body */}
       <View style={s.rowBody}>
         <View style={s.rowTop}>
-          <Text style={s.rowTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={s.rowTitle} numberOfLines={1}>{clearTitle(item)}</Text>
           <Text style={s.rowTime}>{timeAgo(timestamp)}</Text>
         </View>
         <Text style={s.rowType}>{c.label}</Text>
-        <Text style={s.rowMessage} numberOfLines={2}>{item.message}</Text>
+        <Text style={s.rowMessage} numberOfLines={item.type.startsWith('TIP_') ? 5 : 2}>{item.message}</Text>
+        {o && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, marginTop: 6, backgroundColor: o.bg, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+            <Ionicons name={o.icon} size={12} color={o.color} />
+            <Text style={{ fontSize: 11, fontFamily: 'Nunito-Bold', color: o.color }}>{o.text}</Text>
+          </View>
+        )}
       </View>
 
       {/* unread dot */}
@@ -87,6 +107,19 @@ function NotifRow({ item, last }: { item: AppNotification; last?: boolean }) {
 export default function NotificationsScreen() {
   const router = useRouter();
   const { notifications, unreadCount, isLoading, fetchNotifications, markAllRead } = useNotifications();
+
+  // attempt id -> newest outcome (confirmed, not paid, failed) for that tip.
+  const outcomes = React.useMemo(() => {
+    const m = new Map<string, { type: string; at: number }>();
+    for (const n of notifications) {
+      const id = n.metadata?.attemptId as string | undefined;
+      if (!id || !['TIP_RECEIVED', 'TIP_NOT_COMPLETED', 'TIP_FAILED'].includes(n.type)) continue;
+      const at = new Date((n.metadata?.eventAt as string) || n.createdAt).getTime();
+      if (!m.has(id) || m.get(id)!.at < at) m.set(id, { type: n.type, at });
+    }
+    return m;
+  }, [notifications]);
+  const outcomeFor = (n: AppNotification) => outcomes.get(n.metadata?.attemptId as string)?.type;
 
   useEffect(() => {
     fetchNotifications();
@@ -137,7 +170,7 @@ export default function NotificationsScreen() {
             </View>
             <Text style={s.emptyTitle}>All caught up</Text>
             <Text style={s.emptySub}>
-              You'll be notified here when your payout is approved, sent, or when you receive a tip.
+              You'll be notified here about payouts and every tip: when a customer goes to pay, and whether it was paid or not.
             </Text>
           </View>
 
@@ -154,7 +187,7 @@ export default function NotificationsScreen() {
             {/* group into a card */}
             <View style={s.listCard}>
               {notifications.map((n, i) => (
-                <NotifRow key={n.id} item={n} last={i === notifications.length - 1} />
+                <NotifRow key={n.id} item={n} last={i === notifications.length - 1} outcome={outcomeFor(n)} />
               ))}
             </View>
           </ScrollView>

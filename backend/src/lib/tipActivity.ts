@@ -124,16 +124,16 @@ function explain(status: AttemptStatus, a: { amount: string | null; reason: stri
     }
     case 'PENDING':
       return a.reason === 'Paying on Netcash now'
-        ? `The customer is paying ${amt} on Netcash right now. This updates as soon as Netcash confirms.`
-        : `Netcash is still confirming this ${amt} payment. Card payments can take up to 2 days to land. It will update by itself.`
+        ? `The customer is paying ${amt} now. This is not money yet: they still have to approve it in their banking app or on Netcash. It updates as soon as Netcash confirms, or after 15 minutes if they do not pay.`
+        : `Netcash is still confirming this ${amt} payment. It is not on your balance yet. Card payments can take up to 2 days to land. It will update by itself.`
     case 'FAILED':
       return `The ${amt} payment did not go through (${a.reason.replace(/^Netcash did not accept the payment: ?/i, '') || 'declined'}). No money was taken from the customer.`
     case 'INCOMPLETE':
-      return `The customer went to the payment page for ${amt} but came back without paying. No money was taken.`
+      return `The customer went to pay ${amt} but came back without approving it. No money was received.`
     case 'ABANDONED':
       if (a.reason === RETRIED) return `The customer tried again and that later tip was confirmed. This ${amt === 'a' ? '' : amt + ' '}try was not completed and no money was taken for it.`
       return a.paid
-        ? `The customer started paying ${amt} but did not finish. No money was taken.`
+        ? `The customer went to pay ${amt} but did not approve it in their banking app or on Netcash. No money was received.`
         : `A customer opened your tip page${a.amount ? ` and chose ${amt}` : ''} but left without paying. No money was taken.`
     default:
       return 'A customer is on your tip page right now.'
@@ -220,7 +220,8 @@ export async function loadTipActivity(guardMongoId: string, guardPublicId: strin
         received: s.status === 'SUCCESS' ? Number(s.tip?.metadata?.guardReceivesAmount ?? s.tip?.amount ?? 0) : null,
         reference: s.reference,
         startedAt: opened.toISOString(),
-        updatedAt: ev[ev.length - 1].at.toISOString(),
+        // The customer's last step, not our own "CTA notified" notes.
+        updatedAt: (phone[phone.length - 1]?.at || ev[ev.length - 1].at).toISOString(),
         paidAt: s.status === 'SUCCESS' && s.tip ? s.tip.createdAt.toISOString() : null,
         secondsToPay: payEv ? Math.round((payEv.at.getTime() - opened.getTime()) / 1000) : null,
         steps: phone.map(e => ({ at: e.at.toISOString(), kind: e.kind, amount: e.amount })),
