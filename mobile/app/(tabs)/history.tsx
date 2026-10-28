@@ -314,7 +314,7 @@ export default function HistoryScreen() {
     try {
       if (!quiet) setError(null);
       if (!quiet) setLoading(true);
-      const response = await getTransactions('', { limit: 100 }, token);
+      const response = await getTransactions('', { limit: 100, withAttempts: true }, token);
       if (!response.success) {
         const err = response.error || '';
         if (err.includes('Unauthorised') || err.includes('expired') || err.includes('invalid')) {

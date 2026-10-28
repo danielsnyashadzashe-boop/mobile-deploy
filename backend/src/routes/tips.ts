@@ -1,27 +1,21 @@
 import express, { Request, Response, Router } from 'express'
 import { PrismaClient } from '@prisma/client'
-import { getNetcashServiceKey } from '../lib/settings'
-import { timingSafeEqual } from 'crypto'
 
 /** True only for a 24-character hex string, which is what @db.ObjectId needs. */
 function isObjectId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-fA-F0-9]{24}$/.test(value)
 }
 
-/** Constant-time compare, so a wrong key cannot be found a byte at a time. */
-function timingSafeEqualStr(a: string, b: string): boolean {
-  const ab = Buffer.from(a)
-  const bb = Buffer.from(b)
-  if (ab.length !== bb.length) return false
-  return timingSafeEqual(ab, bb)
-}
 import { notifyGuard } from '../lib/notifications'
+import { adminAuth } from '../middleware/adminAuth'
 
 const router: Router = express.Router()
 const prisma = new PrismaClient()
 
 // ==================== PROCESS TIP WITH COMMISSION ====================
-router.post('/tips', async (req: Request, res: Response) => {
+// Credits a CTA's balance, so it needs the admin key. Nothing in the app or the
+// admin site calls it; real tips are credited by the admin server from Netcash.
+router.post('/tips', adminAuth, async (req: Request, res: Response) => {
   try {
     const {
       guardId,
@@ -291,172 +285,20 @@ router.get('/tips/guard/:guardId', async (req: Request, res: Response) => {
 })
 
 // ==================== NETCASH WEBHOOK ====================
-// Netcash PayNow calls this URL (m6) server-to-server after a successful payment.
-// Field mapping (Netcash PayNow POST body):
-//   m1  = service key
-//   p2  = merchant reference  (we set: TIP_<guardId>_<timestamp>_QR)
-//   p3  = description
-//   p4  = amount (string, e.g. "20.00")
-//   p5  = Netcash transaction ID
-// This endpoint is ONLY called on success — there is no status field to check.
-router.post('/webhooks/netcash', async (req: Request, res: Response) => {
-  try {
-    console.log('📥 Netcash webhook received:', JSON.stringify(req.body))
-
-    // Verify service key — Netcash sends it as m1
-    // This endpoint credits real money, so it fails CLOSED. The guard used to
-    // read `if (expectedKey && ...)`, which skipped the check entirely whenever
-    // the netcash_service_key setting was missing or blank: anyone who could
-    // reach the URL could credit any guard any amount.
-    const expectedKey = await getNetcashServiceKey()
-    if (!expectedKey) {
-      console.error('🚨 Netcash webhook refused: netcash_service_key is not configured')
-      return res.status(503).json({ success: false, error: 'Webhook not configured' })
-    }
-
-    const receivedKey = (req.body.m1 || req.headers['x-netcash-service-key']) as string | undefined
-    if (!receivedKey || !timingSafeEqualStr(receivedKey, expectedKey)) {
-      console.warn('⚠️ Netcash webhook rejected: service key mismatch')
-      return res.status(401).json({ success: false, error: 'Unauthorized' })
-    }
-
-    // Extract fields using correct Netcash PayNow field names
-    const reference   = (req.body.p2 || '') as string   // e.g. TIP_GRD001_1718000000000_QR
-    const amountRaw   = (req.body.p4 || '0') as string  // e.g. "20.00"
-    const netcashTxId = (req.body.p5 || '') as string
-
-    const amount = parseFloat(amountRaw)
-    if (!reference || isNaN(amount) || amount <= 0) {
-      console.warn('⚠️ Netcash webhook: missing or invalid p2/p4', req.body)
-      return res.status(400).json({ success: false, error: 'Missing reference or amount' })
-    }
-
-    // Parse guard public ID from reference — format: TIP_<guardId>_<timestamp>_QR
-    const parts   = reference.split('_')
-    const guardId = parts.length >= 2 ? parts[1] : reference
-
-    console.log('💳 Netcash payment:', { reference, guardId, amount, netcashTxId })
-
-    // Idempotency. This used to run only when p5 was present, so a Netcash
-    // retry that omitted it credited the guard a second time. Fall back to the
-    // merchant reference, which we generate ourselves and is always set.
-    const idempotencyKey = netcashTxId || reference
-    const existing = await prisma.transaction.findFirst({
-      where: { reference: idempotencyKey }
-    })
-    if (existing) {
-      console.log('ℹ️ Netcash webhook: already processed', idempotencyKey)
-      return res.json({ success: true, message: 'Already processed' })
-    }
-
-    // Process the tip
-    const tipResult = await processTipInternal({
-      guardId,
-      amount,
-      paymentMethod: 'card',
-      reference: netcashTxId || reference,
-    })
-
-    console.log('✅ Netcash tip processed:', tipResult)
-    return res.json({
-      success: true,
-      message: 'Payment processed',
-      data: tipResult
-    })
-
-  } catch (error) {
-    console.error('❌ Error processing Netcash webhook:', error)
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to process webhook'
-    })
-  }
+// Netcash payments are credited by the admin server only (its Netcash notify
+// handler and the statement reconciler, which match each payment to the CTA and
+// skip duplicates). This server must never credit them as well, or one payment
+// would land on the balance twice. So this endpoint only records that a post
+// arrived, which shows in the logs whether Netcash is sending anything here.
+router.post('/webhooks/netcash', (req: Request, res: Response) => {
+  const body = req.body || {}
+  console.log('📥 Netcash post received (not credited here; the admin server credits Netcash payments):', {
+    fields: Object.keys(body).filter(k => k !== 'm1'),
+    reference: body.Reference || body.p2 || null,
+    amount: body.Amount || body.p4 || null,
+    accepted: body.TransactionAccepted ?? null,
+  })
+  return res.json({ success: true, message: 'Received. Netcash payments are credited by the admin server.' })
 })
-
-// Internal helper function
-async function processTipInternal(data: any) {
-  const { guardId, amount, paymentMethod, reference, customerEmail } = data
-
-  const guard = await prisma.carGuard.findUnique({
-    where: { guardId }
-  })
-
-  if (!guard) {
-    throw new Error('Guard not found')
-  }
-
-  const commissionSetting = await prisma.commissionSetting.findFirst({
-    where: {
-      isActive: true,
-      OR: [{ appliesTo: 'TIPS' }, { appliesTo: 'ALL' }]
-    }
-  })
-
-  const commissionRate = commissionSetting ? commissionSetting.percentage : 0
-  const commissionAmount = amount * (commissionRate / 100)
-  const guardReceivesAmount = amount - commissionAmount
-
-  const tip = await prisma.tip.create({
-    data: {
-      guardId: guard.id,
-      // customerEmail is an email address, not a Customer id, so it never
-      // belonged here. A Netcash QR tip has no customer at all.
-      customerId: undefined,
-      locationId: guard.locationId,
-      amount: guardReceivesAmount
-    }
-  })
-
-  const updatedGuard = await prisma.carGuard.update({
-    where: { id: guard.id },
-    data: {
-      balance: { increment: guardReceivesAmount },
-      lifetimeEarnings: { increment: guardReceivesAmount }
-    }
-  })
-
-  const transaction = await prisma.transaction.create({
-    data: {
-      guardId: guard.id,
-      type: 'TIP',
-      amount: guardReceivesAmount,
-      status: 'COMPLETED',
-      description: customerEmail
-        ? `Tip received from ${customerEmail}`
-        : 'Tip received',
-      reference: reference || null,
-      balance: updatedGuard.balance,
-    }
-  })
-
-  if (commissionAmount > 0) {
-    await prisma.commission.create({
-      data: {
-        guardId: guard.id,
-        transactionId: transaction.id,
-        amount: commissionAmount,
-        rate: commissionRate,
-        originalAmount: amount,
-        guardReceives: guardReceivesAmount,
-        type: 'TIP'
-      }
-    })
-  }
-
-  notifyGuard(
-    guard.id,
-    'TIP_RECEIVED',
-    'You received a tip!',
-    `R${guardReceivesAmount.toFixed(2)} has been added to your balance.`,
-    { amount: guardReceivesAmount, newBalance: updatedGuard.balance }
-  )
-
-  return {
-    tipId: tip.id,
-    originalAmount: amount,
-    commissionAmount,
-    guardReceivesAmount
-  }
-}
 
 export default router

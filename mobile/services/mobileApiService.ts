@@ -289,7 +289,7 @@ export async function getGuardProfile(clerkUserId: string): Promise<ApiResponse<
  */
 export async function getTransactions(
   guardId: string,
-  params?: { limit?: number; offset?: number; type?: string },
+  params?: { limit?: number; offset?: number; type?: string; withAttempts?: boolean },
   token?: string
 ): Promise<ApiResponse<{ transactions: Transaction[]; pagination: { total: number; hasMore: boolean } }>> {
   try {
@@ -297,6 +297,8 @@ export async function getTransactions(
     if (params?.limit) queryParams.set('limit', params.limit.toString());
     if (params?.offset) queryParams.set('offset', params.offset.toString());
     if (params?.type) queryParams.set('type', params.type);
+    // History only: also send the unpaid, failed and waiting tips (with their steps).
+    if (params?.withAttempts) queryParams.set('withAttempts', '1');
 
     const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
     const headers: Record<string, string> = {};

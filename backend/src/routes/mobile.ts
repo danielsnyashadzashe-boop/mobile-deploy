@@ -952,7 +952,11 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
   try {
     const { limit = '50', offset = '0', type } = req.query
     const guardId = req.guard!.guardId
-    const firstPage = parseInt(offset as string) === 0 && (!type || String(type).toUpperCase() === 'TIP')
+    // Unpaid, failed and waiting tips are added only when the app asks for them
+    // (History does). Older app versions add up every TIP row as earnings, so they
+    // must never receive rows that are not money.
+    const withAttempts = ['1', 'true'].includes(String(req.query.withAttempts || '').toLowerCase())
+    const firstPage = withAttempts && parseInt(offset as string) === 0 && (!type || String(type).toUpperCase() === 'TIP')
 
     const where: any = { guardId }
     if (type) where.type = String(type).toUpperCase()
@@ -976,9 +980,16 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
     if (me) {
       // At least the last 90 days of tip attempts, so every unpaid one is listed.
       const since = new Date(Math.min(oldest.getTime() - 7 * 86400000, Date.now() - 90 * 86400000))
-      const activity = await loadTipActivity(guardId, me.guardId, since)
-      tippaTipIds = activity.tippaTipIds
-      if (firstPage) unpaid = activity.attempts.filter(a => a.status !== 'SUCCESS')
+      try {
+        const activity = await loadTipActivity(guardId, me.guardId, since)
+        tippaTipIds = activity.tippaTipIds
+        if (firstPage) unpaid = activity.attempts.filter(a => a.status !== 'SUCCESS')
+      } catch (e) {
+        // History asked for the whole picture: fail rather than send a list without the
+        // unpaid tips. Other callers only lose the QR labels.
+        if (withAttempts) throw e
+        console.warn('tip activity unavailable for transaction labels:', (e as Error).message)
+      }
     }
     // Old records for the same attempt (the "unconfirmed" ones the old system wrote)
     // are replaced by the attempt row, which is the accurate one.
@@ -1015,7 +1026,7 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
     return res.json({
       success: true,
       data: {
-        includesTipAttempts: true,
+        includesTipAttempts: withAttempts,
         transactions: [...transactions.filter(t => !misreadPaid.has(t.id) && !(t.status !== 'COMPLETED' && (unpaidRefs.has(t.reference || '') || unpaidRefs.has(String((t.metadata as any)?.tippaReference || ''))))).map(t => {
           const meta = (t.metadata as Record<string, any>) ?? {}
           let status = t.status || 'COMPLETED'
@@ -1331,12 +1342,27 @@ router.post('/mobile/me/notifications/backfill', mobileAuth, async (req: Request
     })
     if (!guard) return res.status(404).json({ success: false, error: 'Guard not found' })
 
-    // Get the last 50 TIP transactions for this guard
-    const txs = await prisma.transaction.findMany({
-      where: { guardId, type: 'TIP' },
+    // The last 50 tips that are money on the balance. Failed and unconfirmed
+    // records must never become a "Tip received" notice.
+    const paid = await prisma.transaction.findMany({
+      where: { guardId, type: 'TIP', status: 'COMPLETED' },
       orderBy: { createdAt: 'desc' },
       take: 50,
     })
+
+    // Tippa QR tips already get "Tip confirmed" from the admin server, so they are
+    // left out here: one tip, one notice.
+    let tippaTipIds = new Set<string>()
+    const me = await prisma.carGuard.findUnique({ where: { id: guardId }, select: { guardId: true } })
+    if (me && paid.length) {
+      try {
+        const since = new Date(paid[paid.length - 1].createdAt.getTime() - 7 * 86400000)
+        ;({ tippaTipIds } = await loadTipActivity(guardId, me.guardId, since))
+      } catch (e) {
+        console.warn('backfill: tip activity unavailable, matching Tippa QR tips by reference only:', (e as Error).message)
+      }
+    }
+    const txs = paid.filter(t => channelOf(t, tippaTipIds) !== 'TIPPA_QR')
 
     if (txs.length === 0) return res.json({ success: true, created: 0 })
 
