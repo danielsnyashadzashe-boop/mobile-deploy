@@ -23,6 +23,7 @@ const QR_TEST_ENTITY = 'NetcashQrTest'
 const NETCASH_TIMEOUT_MS = 15 * 60 * 1000 // no word from Netcash this long after Pay -> abandoned
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000 // tip page untouched this long without Pay -> abandoned
 const MISREAD = /result code: undefined/ // old admin code saved every Netcash reply as failed
+const NO_STATEMENT_PAYMENT = 'Netcash replied, but no payment for it reached the Netcash statement within 7 days'
 const RETRY_WINDOW_MS = 30 * 60 * 1000 // a try this close before a confirmed one, on the same phone, is the same customer
 
 export const LIVE_SITE = process.env.PUBLIC_TIP_BASE_URL || 'https://www.tippapaymentsolutions.com'
@@ -75,7 +76,16 @@ function summarise(allEvents: AttemptEvent[], tips: TipRow[], now: number, claim
     // Confirmed needs two proofs: the money is on the CTA's balance (a completed tip) AND
     // it is this payment's: it carries this reference, or Netcash approved this payment,
     // or it is the only credit of that amount since Pay so it cannot be another tip.
-    const byAmount = candidates.length && (last('NETCASH_ACCEPTED') || candidates.length === 1) ? candidates[0] : null
+    // A payment made through the tip page: the statement shows "Tip for <name>" with the
+    // CTA ID, "QRTEST" and (since the fix) this tip's reference in the extras.
+    const viaTippaQr = (t: TipRow) => /^QRT/i.test(t.metadata?.tippaReference || '') || t.metadata?.netcashExtra2 === 'QRTEST' || /^Tip for /i.test(t.metadata?.netcashDescription || '')
+    // Netcash replied for this reference, but the old bug saved the reply as failed.
+    const netcashReplied = byRef.some(t => t.status === 'FAILED' && MISREAD.test(t.failureReason || t.description || ''))
+    const tippaCandidates = candidates.filter(viaTippaQr)
+    const byAmount = candidates.length && (last('NETCASH_ACCEPTED') || candidates.length === 1) ? candidates[0]
+      // Netcash replied for this exact payment AND a tip-page payment of the same amount
+      // reached the statement for this CTA: two proofs, oldest unclaimed first.
+      : netcashReplied && tippaCandidates.length ? tippaCandidates[0] : null
     const done = refCompleted || byAmount
     if (done) {
       claimed.add(done.id)
@@ -85,6 +95,8 @@ function summarise(allEvents: AttemptEvent[], tips: TipRow[], now: number, claim
     if (other) {
       claimed.add(other.id)
       if (other.status === 'FAILED' && MISREAD.test(other.failureReason || other.description || '')) {
+        // Wait for the statement, but never for ever.
+        if (now - payAt > 7 * 86400000) return { ...base, tip: other, status: 'ABANDONED' as AttemptStatus, reason: NO_STATEMENT_PAYMENT }
         return { ...base, tip: other, status: 'PENDING' as AttemptStatus, reason: 'Waiting for Netcash to confirm' }
       }
       return { ...base, tip: other, status: (other.status === 'FAILED' ? 'FAILED' : 'PENDING') as AttemptStatus, reason: other.failureReason || 'Netcash did not accept the payment' }
@@ -114,8 +126,15 @@ function summarise(allEvents: AttemptEvent[], tips: TipRow[], now: number, claim
 const rand = (v: number | string | null | undefined) => `R${Number(v || 0).toFixed(2)}`
 
 /** One sentence a CTA can read and understand, for each outcome. */
-function explain(status: AttemptStatus, a: { amount: string | null; reason: string; tip: TipRow | null; paid: boolean }) {
+interface StepTimes { openedAt: Date; lastAt: Date; acceptedAt: Date | null; payAt: Date | null; leftAt: Date | null; returnedAt: Date | null; ref: string | null }
+
+/** "10:42", South African time. */
+const hhmm = (d: Date) => sast(d).time.slice(0, 5)
+
+function explain(status: AttemptStatus, a: { amount: string | null; reason: string; tip: TipRow | null; paid: boolean } & StepTimes) {
   const amt = a.amount ? rand(a.amount) : 'a'
+  const at = (d: Date | null) => (d ? hhmm(d) : 'that time')
+  const ref = a.ref ? ` Reference ${a.ref}.` : ''
   switch (status) {
     case 'SUCCESS': {
       const got = a.tip?.metadata?.guardReceivesAmount ?? a.tip?.amount
@@ -124,20 +143,44 @@ function explain(status: AttemptStatus, a: { amount: string | null; reason: stri
     }
     case 'PENDING':
       return a.reason === 'Paying on Netcash now'
-        ? `The customer is paying ${amt} now. This is not money yet: they still have to approve it in their banking app or on Netcash. It updates as soon as Netcash confirms, or after 15 minutes if they do not pay.`
-        : `Netcash is still confirming this ${amt} payment. It is not on your balance yet. Card payments can take up to 2 days to land. It will update by itself.`
+        ? `The customer pressed Pay at ${at(a.payAt)} and went to their bank or Netcash to pay ${amt}. This is not money yet: they still have to approve it. It updates as soon as Netcash confirms, or after 15 minutes if they do not pay.${ref}`
+        : a.acceptedAt
+          ? `Netcash approved this ${amt} payment at ${at(a.acceptedAt)}. It is not on your balance yet: it is added as soon as the money reaches the Netcash statement, which can take up to 2 days. It updates by itself.${ref}`
+          : `Netcash is still confirming this ${amt} payment. It is not on your balance yet. Card payments can take up to 2 days to land. It will update by itself.${ref}`
     case 'FAILED':
-      return `The ${amt} payment did not go through (${a.reason.replace(/^Netcash did not accept the payment: ?/i, '') || 'declined'}). No money was taken from the customer.`
+      return `The customer pressed Pay at ${at(a.payAt)}, but the ${amt} payment did not go through (${a.reason.replace(/^Netcash did not accept the payment: ?/i, '') || 'declined'}). No money was taken from the customer.${ref}`
     case 'INCOMPLETE':
-      return `The customer went to pay ${amt} but came back without approving it. No money was received.`
+      return `The customer pressed Pay at ${at(a.payAt)} to pay ${amt}, then came back at ${at(a.returnedAt)} without approving it. No money was received.${ref}`
     case 'ABANDONED':
+      if (a.reason === NO_STATEMENT_PAYMENT) return `The customer pressed Pay at ${at(a.payAt)} to pay ${amt}. Netcash replied, but no payment for it reached your account on the Netcash statement within 7 days. No money was received.${ref}`
       if (a.reason === RETRIED) return `The customer tried again and that later tip was confirmed. This ${amt === 'a' ? '' : amt + ' '}try was not completed and no money was taken for it.`
       return a.paid
-        ? `The customer went to pay ${amt} but did not approve it in their banking app or on Netcash. No money was received.`
-        : `A customer opened your tip page${a.amount ? ` and chose ${amt}` : ''} but left without paying. No money was taken.`
+        ? `The customer pressed Pay at ${at(a.payAt)} and went to their bank or Netcash to pay ${amt}, but no payment arrived by ${at(a.payAt && new Date(a.payAt.getTime() + NETCASH_TIMEOUT_MS))}. No money was received. If they say they paid, ask to see the payment in their banking app${a.ref ? ` with reference ${a.ref}` : ''}: a real payment still shows here as soon as Netcash confirms it.`
+        : `A customer scanned your QR at ${at(a.openedAt)}${a.amount ? ` and chose ${amt}` : ''}, then ${a.leftAt ? `left the tip page at ${at(a.leftAt)} before going to pay` : `left without going to pay (nothing more happened after ${at(a.lastAt)})`}. No money was received.`
     default:
-      return 'A customer is on your tip page right now.'
+      return `A customer scanned your QR at ${at(a.openedAt)} and is on your tip page now${a.amount ? `, with ${amt} chosen` : ''}. Nothing has been paid yet.`
   }
+}
+
+const STEP_TEXT: Record<string, string> = {
+  OPENED: 'Scanned your QR and opened your tip page',
+  AMOUNT_CHOSEN: 'Chose an amount',
+  PAY_PRESSED: 'Pressed Pay and went to their bank or Netcash',
+  PAY_ERROR: 'The payment could not start',
+  PAGE_HIDDEN: 'Left or closed the tip page',
+  PAGE_VISIBLE: 'Came back to the tip page',
+  RETURNED_FROM_NETCASH: 'Came back from their bank or Netcash without paying',
+  NETCASH_ACCEPTED: 'Netcash approved the payment',
+  NETCASH_DECLINED: 'Netcash declined the payment',
+}
+
+/** Each step with its time, in words, plus how it ended. Used in History and Tip activity. */
+function timelineOf(phone: AttemptEvent[], status: AttemptStatus, payAt: Date | null) {
+  const out = phone
+    .filter(e => STEP_TEXT[e.kind])
+    .map(e => ({ time: hhmm(e.at), text: e.kind === 'AMOUNT_CHOSEN' && e.amount ? `Chose ${rand(e.amount)}` : STEP_TEXT[e.kind] }))
+  if (status === 'ABANDONED' && payAt) out.push({ time: hhmm(new Date(payAt.getTime() + NETCASH_TIMEOUT_MS)), text: 'No payment arrived from their bank or Netcash' })
+  return out
 }
 
 export const STATUS_LABEL: Record<AttemptStatus, string> = {
@@ -187,9 +230,14 @@ export async function loadTipActivity(guardMongoId: string, guardPublicId: strin
   const claimed = new Set(tips.filter(t => refs.some(r => t.reference === r || t.metadata?.tippaReference === r || (t.description || '').includes(r))).map(t => t.id))
   const payAt = (ev: AttemptEvent[]) => { const p = ev.filter(e => e.kind === 'PAY_PRESSED').pop(); return p ? p.at.getTime() : Infinity }
 
+  // Attempts Netcash itself spoke about (approved, or replied for that reference) pick
+  // their payment first, so a weaker "same amount" match can never take it from them.
+  const repliedRefs = new Set(tips.filter(t => t.status === 'FAILED' && MISREAD.test(t.failureReason || t.description || '')).map(t => t.reference).filter(Boolean) as string[])
+  const netcashSpoke = (ev: AttemptEvent[]) => ev.some(e => e.kind === 'NETCASH_ACCEPTED' || (e.kind === 'PAY_PRESSED' && !!e.reference && repliedRefs.has(e.reference)))
+
   const tippaTipIds = new Set<string>()
   const summed = [...byAttempt.entries()]
-    .sort((x, y) => payAt(x[1]) - payAt(y[1]))
+    .sort((x, y) => (Number(!netcashSpoke(x[1])) - Number(!netcashSpoke(y[1]))) || payAt(x[1]) - payAt(y[1]))
     .map(([id, ev]) => {
       const s = summarise(ev, tips, now, claimed)
       const phone = ev.filter(e => e.kind !== 'CTA_NOTIFIED')
@@ -211,11 +259,17 @@ export async function loadTipActivity(guardMongoId: string, guardPublicId: strin
       const phone = ev.filter(e => e.kind !== 'CTA_NOTIFIED')
       const opened = phone.find(e => e.kind === 'OPENED')?.at || phone[0]?.at || ev[0].at
       const payEv = phone.find(e => e.kind === 'PAY_PRESSED')
+      const lastOf = (k: string) => [...phone].reverse().find(e => e.kind === k)?.at || null
+      const payAt = lastOf('PAY_PRESSED')
       return {
         id,
         status: s.status,
         statusLabel: STATUS_LABEL[s.status],
-        explanation: explain(s.status, { amount: s.amount, reason: s.reason, tip: s.tip, paid }),
+        explanation: explain(s.status, {
+          amount: s.amount, reason: s.reason, tip: s.tip, paid,
+          openedAt: opened, lastAt: phone[phone.length - 1]?.at || opened, acceptedAt: lastOf('NETCASH_ACCEPTED'), payAt, leftAt: lastOf('PAGE_HIDDEN'), returnedAt: lastOf('RETURNED_FROM_NETCASH'), ref: s.reference,
+        }),
+        timeline: timelineOf(phone, s.status, payAt),
         amount: s.amount ? Number(s.amount) : null,
         received: s.status === 'SUCCESS' ? Number(s.tip?.metadata?.guardReceivesAmount ?? s.tip?.amount ?? 0) : null,
         reference: s.reference,

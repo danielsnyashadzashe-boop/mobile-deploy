@@ -73,6 +73,8 @@ export interface Transaction {
   channelLabel?: string;
   /** Plain explanation of what happened, written for the CTA. */
   explanation?: string;
+  /** For tips that were not paid: each step the customer took, with its time. */
+  timeline?: { time: string; text: string }[];
 }
 
 export type TipChannel = 'TIPPA_QR' | 'NETCASH_QR' | 'OTHER';
@@ -92,6 +94,8 @@ export interface TipAttempt {
   paidAt: string | null;
   secondsToPay: number | null;
   steps: { at: string; kind: string; amount: string | null }[];
+  /** Each step in words with its time (newer servers). */
+  timeline?: { time: string; text: string }[];
 }
 
 export interface TipActivity {

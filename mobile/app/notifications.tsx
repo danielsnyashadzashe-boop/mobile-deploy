@@ -31,6 +31,7 @@ const TYPE_CONFIG: Record<string, {
   TIP_FAILED:        { icon: 'close-circle',    color: '#EF4444', bg: '#FEF2F2', label: 'Payment failed · no money' },
   TIP_NOT_COMPLETED: { icon: 'return-down-back', color: '#6B7280', bg: '#F3F4F6', label: 'Not paid · no money' },
   TIP_UPDATE:        { icon: 'refresh-circle',  color: '#B45309', bg: '#FEF3C7', label: 'Tip update'        },
+  TIP_APPROVED:      { icon: 'shield-checkmark', color: '#0E7490', bg: '#ECFEFF', label: 'Approved by Netcash · not on your balance yet' },
   ADMIN_MESSAGE:   { icon: 'megaphone',         color: '#8B5CF6', bg: '#F5F3FF', label: 'Message'         },
   DEFAULT:         { icon: 'notifications',     color: '#6B7280', bg: '#F3F4F6', label: 'Notification'    },
 };
@@ -59,6 +60,7 @@ const OUTCOME: Record<string, { text: string; color: string; bg: string; icon: k
   TIP_RECEIVED:      { text: 'Now: confirmed, money on your balance', color: '#047857', bg: '#D1FAE5', icon: 'checkmark-circle' },
   TIP_NOT_COMPLETED: { text: 'Now: not paid, no money received',      color: '#4B5563', bg: '#F3F4F6', icon: 'return-down-back' },
   TIP_FAILED:        { text: 'Now: payment failed, no money',          color: '#B91C1C', bg: '#FEE2E2', icon: 'close-circle' },
+  TIP_APPROVED:      { text: 'Now: approved by Netcash, being added',  color: '#0E7490', bg: '#CFFAFE', icon: 'shield-checkmark' },
   WAITING:           { text: 'Still waiting: not money yet',           color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' },
 };
 
@@ -113,7 +115,7 @@ export default function NotificationsScreen() {
     const m = new Map<string, { type: string; at: number }>();
     for (const n of notifications) {
       const id = n.metadata?.attemptId as string | undefined;
-      if (!id || !['TIP_RECEIVED', 'TIP_NOT_COMPLETED', 'TIP_FAILED'].includes(n.type)) continue;
+      if (!id || !['TIP_RECEIVED', 'TIP_NOT_COMPLETED', 'TIP_FAILED', 'TIP_APPROVED'].includes(n.type)) continue;
       const at = new Date((n.metadata?.eventAt as string) || n.createdAt).getTime();
       if (!m.has(id) || m.get(id)!.at < at) m.set(id, { type: n.type, at });
     }

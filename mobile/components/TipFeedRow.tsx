@@ -51,7 +51,12 @@ export function TipFeedRow({ item, compact = false }: { item: FeedItem; compact?
 
         {open && (
           <View style={{ marginTop: 10, borderLeftWidth: 2, borderLeftColor: '#DBEAFE', paddingLeft: 10, gap: 6 }}>
-            {steps.map((st, i) => (
+            {item.attempt?.timeline?.length ? item.attempt.timeline.map((st, i) => (
+              <View key={i} style={{ flexDirection: 'row', gap: 8 }}>
+                <Text style={{ fontSize: 11, fontFamily: 'Nunito-SemiBold', color: '#6B7280', width: 54 }}>{st.time}</Text>
+                <Text style={{ fontSize: 12, fontFamily: 'Nunito-Regular', color: '#374151', flex: 1 }}>{st.text}</Text>
+              </View>
+            )) : steps.map((st, i) => (
               <View key={i} style={{ flexDirection: 'row', gap: 8 }}>
                 <Text style={{ fontSize: 11, fontFamily: 'Nunito-SemiBold', color: '#6B7280', width: 54 }}>
                   {new Date(st.at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}

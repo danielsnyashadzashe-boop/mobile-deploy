@@ -952,6 +952,7 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
   try {
     const { limit = '50', offset = '0', type } = req.query
     const guardId = req.guard!.guardId
+    const firstPage = parseInt(offset as string) === 0 && (!type || String(type).toUpperCase() === 'TIP')
 
     const where: any = { guardId }
     if (type) where.type = String(type).toUpperCase()
@@ -971,18 +972,51 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
     const oldest = transactions.length ? transactions[transactions.length - 1].createdAt : new Date()
     const me = await prisma.carGuard.findUnique({ where: { id: guardId }, select: { guardId: true } })
     let tippaTipIds = new Set<string>()
+    let unpaid: Awaited<ReturnType<typeof loadTipActivity>>['attempts'] = []
     if (me) {
-      try {
-        ;({ tippaTipIds } = await loadTipActivity(guardId, me.guardId, new Date(oldest.getTime() - 7 * 86400000)))
-      } catch (e) {
-        console.warn('tip activity unavailable for transaction labels:', (e as Error).message)
+      // At least the last 90 days of tip attempts, so every unpaid one is listed.
+      const since = new Date(Math.min(oldest.getTime() - 7 * 86400000, Date.now() - 90 * 86400000))
+      const activity = await loadTipActivity(guardId, me.guardId, since)
+      tippaTipIds = activity.tippaTipIds
+      if (firstPage) unpaid = activity.attempts.filter(a => a.status !== 'SUCCESS')
+    }
+    // Old records for the same attempt (the "unconfirmed" ones the old system wrote)
+    // are replaced by the attempt row, which is the accurate one.
+    const unpaidRefs = new Set(unpaid.map(a => a.reference).filter(Boolean) as string[])
+
+    // Records the old callback bug saved as "failed" (they stopped on 22 Oct 2026, when
+    // it was fixed). They are never left "pending" for ever:
+    //  - a credited tip of the same amount for this CTA within 7 days after it means
+    //    the money came through as that tip, so this record is a duplicate and is left out;
+    //  - otherwise, once 7 days have passed with nothing on the Netcash statement for
+    //    this CTA, it is shown as not paid;
+    //  - within those 7 days it stays "waiting for Netcash".
+    const STATEMENT_WINDOW_MS = 7 * 86400000
+    const misread = transactions.filter(isMisreadFailure).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+    const misreadPaid = new Set<string>()
+    const misreadNotPaid = new Set<string>()
+    if (misread.length) {
+      const credited = await prisma.transaction.findMany({
+        where: { guardId, type: 'TIP', status: 'COMPLETED' },
+        select: { id: true, amount: true, metadata: true, createdAt: true },
+      })
+      const used = new Set<string>()
+      for (const t of misread) {
+        const amount = +(t.amount * 100).toFixed(2)
+        const twin = credited.find(c => !used.has(c.id)
+          && Math.abs(Number((c.metadata as any)?.originalAmount ?? c.amount) - amount) < 0.01
+          && c.createdAt.getTime() >= t.createdAt.getTime()
+          && c.createdAt.getTime() - t.createdAt.getTime() <= STATEMENT_WINDOW_MS)
+        if (twin) { used.add(twin.id); misreadPaid.add(t.id) }
+        else if (Date.now() - t.createdAt.getTime() > STATEMENT_WINDOW_MS) misreadNotPaid.add(t.id)
       }
     }
 
     return res.json({
       success: true,
       data: {
-        transactions: transactions.map(t => {
+        includesTipAttempts: true,
+        transactions: [...transactions.filter(t => !misreadPaid.has(t.id) && !(t.status !== 'COMPLETED' && (unpaidRefs.has(t.reference || '') || unpaidRefs.has(String((t.metadata as any)?.tippaReference || ''))))).map(t => {
           const meta = (t.metadata as Record<string, any>) ?? {}
           let status = t.status || 'COMPLETED'
           const when = sast(t.createdAt) // South African time, not the server's UTC
@@ -1007,11 +1041,19 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
           // The old admin code saved every Netcash reply as failed, whatever happened.
           // These are not real failures: say so instead of showing "failed".
           if (isMisreadFailure(t)) {
-            status = 'UNCONFIRMED'
-            row.status = status
             // The same old code also divided the amount by 100 (R5.00 was saved as R0.05).
             row.amount = +(t.amount * 100).toFixed(2)
-            row.explanation = 'Netcash replied, but our old system misread the reply. This is not a confirmed failure. If the money was paid, it is added from the Netcash statement as a separate tip.'
+            if (misreadNotPaid.has(t.id)) {
+              status = 'NOT_COMPLETED'
+              row.status = status
+              row.description = 'Tip not paid'
+              row.failureReason = 'Not paid'
+              row.explanation = `A customer started this R${(row.amount as number).toFixed(2)} payment on ${when.date}, but no payment for it reached your account on the Netcash statement in the 7 days after. No money was received. (Our old system first saved it as failed by mistake.)`
+            } else {
+              status = 'UNCONFIRMED'
+              row.status = status
+              row.explanation = 'Waiting for Netcash: a customer started this payment and Netcash has not confirmed it yet. It is not on your balance. If it was paid, it appears from the Netcash statement as a separate tip; if nothing arrives within 7 days, it shows here as not paid.'
+            }
           } else if (status === 'FAILED' || status === 'REVERSED') {
             const why = String(t.failureReason || meta.failureReason || '').replace(/^Netcash did not accept the payment:?\s*/i, '')
             row.failureReason = why || 'The payment did not go through'
@@ -1024,7 +1066,30 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
               : `R${t.amount.toFixed(2)} added to your balance.`
           }
           return row
-        }),
+        }), ...unpaid.map(a => {
+          // Every tip a customer started but did not pay, with the time and each step.
+          const status = a.status === 'FAILED' ? 'FAILED' : a.status === 'PENDING' || a.status === 'IN_PROGRESS' ? 'PENDING' : 'NOT_COMPLETED'
+          const when = sast(new Date(a.startedAt))
+          return {
+            id: `attempt-${a.id}`,
+            type: 'TIP',
+            amount: a.amount ?? 0,
+            noAmount: a.amount == null,
+            description: status === 'FAILED' ? 'Tip failed' : status === 'PENDING' ? 'Tip pending · not money yet' : 'Tip not paid',
+            status,
+            reference: a.reference,
+            balance: null,
+            date: when.date,
+            time: when.time,
+            createdAt: a.startedAt,
+            failureReason: a.statusLabel,
+            channel: 'TIPPA_QR',
+            channelLabel: CHANNEL_LABEL.TIPPA_QR,
+            explanation: a.explanation,
+            timeline: a.timeline,
+            metadata: { fromAttempt: true, attemptId: a.id },
+          }
+        })].sort((x: any, y: any) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime()),
         pagination: {
           total,
           limit: parseInt(limit as string),

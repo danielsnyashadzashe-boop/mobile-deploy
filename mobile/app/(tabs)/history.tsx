@@ -51,7 +51,8 @@ function attemptToRow(a: TipAttempt): Transaction {
     channel: 'TIPPA_QR',
     channelLabel: 'Tippa QR',
     explanation: a.explanation,
-    metadata: { fromAttempt: true },
+    timeline: a.timeline,
+    metadata: { fromAttempt: true, attemptId: a.id },
   };
 }
 
@@ -252,7 +253,18 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
           </View>
         )}
 
-        {!failed && (item as any).reference && (
+        {!!item.timeline?.length && (
+          <View style={hStyles.timelineBox}>
+            {item.timeline.map((st, i) => (
+              <View key={i} style={hStyles.timelineRow}>
+                <Text style={hStyles.timelineTime}>{st.time}</Text>
+                <Text style={hStyles.timelineText}>{st.text}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {(item as any).reference && (
           <Text style={hStyles.txRef}>Ref: {(item as any).reference}</Text>
         )}
         {!failed && !unconfirmed && hasCommission && !item.explanation && (
@@ -276,9 +288,6 @@ export default function HistoryScreen() {
   const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState<string | null>(null);
   const [transactions, setTransactions]     = useState<Transaction[]>([]);
-  // Set when the unfinished/failed tips could not be loaded, so the list is not
-  // mistaken for complete.
-  const [attemptsError, setAttemptsError]   = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [selectedPeriod, setSelectedPeriod] = useState('All Time');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
@@ -316,10 +325,22 @@ export default function HistoryScreen() {
         return;
       }
       const txs: Transaction[] = response.data?.transactions || [];
-      // Tippa QR attempts that did not complete, for the last 90 days.
-      const activity = await getTipActivity(token, 90);
-      const attempts = activity.success ? (activity.data?.attempts || []) : [];
-      setAttemptsError(activity.success ? null : (activity.error || 'Could not load unfinished tips.'));
+      // The server sends every unpaid, failed and waiting tip with the payments, so
+      // History is always the whole picture.
+      if ((response.data as any)?.includesTipAttempts) { setTransactions(txs); return; }
+
+      // Older server: fetch the tip attempts separately (retrying), and never show a
+      // list without them as if it were complete.
+      let activity = await getTipActivity(token, 90);
+      for (let i = 0; i < 2 && !activity.success; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        activity = await getTipActivity(token, 90);
+      }
+      if (!activity.success) {
+        if (!quiet) setError('History could not load completely. Pull down to try again.');
+        return;
+      }
+      const attempts = activity.data?.attempts || [];
       const unfinished = attempts.filter(a => a.status !== 'SUCCESS');
       // The attempt row is the accurate one: drop old transaction rows for the same
       // attempt (the "unconfirmed" records the old system wrote).
@@ -460,14 +481,6 @@ export default function HistoryScreen() {
   // ── List header ─────────────────────────────────────────────────────────────
   const ListHeader = () => (
     <>
-      {attemptsError && (
-        <View style={hStyles.attemptsErrorBox}>
-          <Ionicons name="cloud-offline-outline" size={16} color="#B45309" style={{ marginTop: 1 }} />
-          <Text style={hStyles.attemptsErrorText}>
-            Unpaid and failed tips could not be loaded right now, so only completed payments are listed. {attemptsError} Pull down to try again.
-          </Text>
-        </View>
-      )}
       {totalFailedCount > 0 && selectedFilter !== 'failed' && (
         <FailedBanner count={totalFailedCount} />
       )}
@@ -476,7 +489,7 @@ export default function HistoryScreen() {
 
   // ── Empty state label ────────────────────────────────────────────────────────
   const emptyLabel = selectedFilter === 'failed'
-    ? (attemptsError ? 'Unpaid tips could not be loaded. Pull down to try again.' : 'No unpaid or failed tips. All good!')
+    ? 'No unpaid or failed tips. All good!'
     : selectedFilter === 'pending'
     ? 'Nothing waiting for payment.'
     : `No ${selectedFilter !== 'all' ? selectedFilter + ' ' : ''}transactions for ${selectedPeriod}.`;
@@ -805,8 +818,10 @@ const hStyles = StyleSheet.create({
   noAmount:      { fontSize: 12, fontFamily: 'Nunito-SemiBold', color: '#9CA3AF' },
   confirmedBadge:{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#D1FAE5', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   confirmedBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#047857', textTransform: 'uppercase', letterSpacing: 0.3 },
-  attemptsErrorBox:  { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginTop: 10, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 12, padding: 10 },
-  attemptsErrorText: { flex: 1, fontSize: 12, fontFamily: 'Nunito-Regular', color: '#92400E', lineHeight: 17 },
+  timelineBox:   { marginTop: 8, borderLeftWidth: 2, borderLeftColor: '#E5E7EB', paddingLeft: 10, gap: 4 },
+  timelineRow:   { flexDirection: 'row', gap: 8 },
+  timelineTime:  { fontSize: 11, fontFamily: 'Nunito-Bold', color: '#6B7280', width: 40 },
+  timelineText:  { flex: 1, fontSize: 12, fontFamily: 'Nunito-Regular', color: '#374151', lineHeight: 16 },
   pendingBadge:  { backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   pendingBadgeText:{ fontSize: 10, fontFamily: 'Nunito-Bold', color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: 0.3 },
   pendingBox:    { flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, backgroundColor: '#EFF6FF', borderRadius: 8, padding: 8 },
