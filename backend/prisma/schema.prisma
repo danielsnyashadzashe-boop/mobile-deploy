@@ -712,19 +712,6 @@ model Notification {
   user              User             @relation(fields: [userId], references: [id])
 }
 
-// Written by the admin server (web/server.js), which owns the full model. Only the
-// fields this server reads, all optional, so it reads tip steps with a normal query.
-model ActivityLog {
-  id                String           @id @default(auto()) @map("_id") @db.ObjectId
-  entityType        String?
-  entityId          String?
-  entityName        String?
-  timestamp         DateTime?
-  metadata          Json?
-  errorMessage      String?
-  userAgent         String?
-}
-
 model AuditLog {
   id                String           @id @default(auto()) @map("_id") @db.ObjectId
   userId            String           @db.ObjectId

@@ -34,19 +34,35 @@ interface TipRow { id: string; reference: string | null; status: string | null; 
 
 // ── Mongo extended JSON helpers (rows come back from $runCommandRaw) ──────────
 const asDate = (v: any): Date => new Date(v && typeof v === 'object' && '$date' in v ? (typeof v.$date === 'object' ? Number(v.$date.$numberLong) : v.$date) : v)
+/** Extended JSON from a raw command to plain values: ids to strings, numbers to numbers, dates to ISO strings. */
+function plain(v: any): any {
+  if (Array.isArray(v)) return v.map(plain)
+  if (!v || typeof v !== 'object') return v
+  if ('$oid' in v) return v.$oid
+  if ('$date' in v) return asDate(v).toISOString()
+  for (const k of ['$numberDouble', '$numberInt', '$numberLong', '$numberDecimal']) if (k in v) return Number(v[k])
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plain(x)]))
+}
+
+// Both reads below are raw commands on purpose. The live server runs a database client
+// generated from an older schema (it does not know ActivityLog, or newer Transaction
+// fields such as failureReason), so a typed query for those fails there. A raw command
+// reads whatever is stored, whatever the client knows.
 
 async function readAttemptEvents(guardPublicId: string, since: Date) {
-  // A normal query, not a raw command: the raw command failed on the live server.
-  const docs = await prisma.activityLog.findMany({
-    where: { entityType: QR_TEST_ENTITY, entityName: guardPublicId, timestamp: { gte: since } },
-    orderBy: { timestamp: 'asc' },
-    take: 2000,
-    select: { entityId: true, timestamp: true, metadata: true, errorMessage: true, userAgent: true },
+  const res: any = await prisma.$runCommandRaw({
+    find: 'ActivityLog',
+    filter: { entityType: QR_TEST_ENTITY, entityName: guardPublicId, timestamp: { $gte: { $date: since.toISOString() } } },
+    sort: { timestamp: 1 },
+    limit: 2000,
+    batchSize: 2000, // all in the first batch: a raw find does not fetch further batches
+    projection: { entityId: 1, timestamp: 1, metadata: 1, errorMessage: 1, userAgent: 1 },
   })
+  const docs: any[] = res?.cursor?.firstBatch || []
   const byAttempt = new Map<string, AttemptEvent[]>()
   for (const d of docs) {
     if (!d.entityId || !d.timestamp) continue
-    const m = (d.metadata as Record<string, any>) || {}
+    const m = plain(d.metadata) || {}
     const list = byAttempt.get(d.entityId) || []
     list.push({ at: asDate(d.timestamp), kind: m.kind, amount: m.amount || null, reference: m.reference || null, reason: d.errorMessage || null, source: m.source || 'PHONE', device: d.userAgent || null })
     byAttempt.set(d.entityId, list)
@@ -207,13 +223,24 @@ function concludeRetries<T extends { status: AttemptStatus; reason: string; devi
 }
 
 async function tipsFor(guardMongoId: string, since: Date): Promise<TipRow[]> {
-  const rows = await prisma.transaction.findMany({
-    where: { guardId: guardMongoId, type: 'TIP', createdAt: { gte: since } },
-    orderBy: { createdAt: 'desc' },
-    take: 500,
-    select: { id: true, reference: true, status: true, amount: true, description: true, failureReason: true, createdAt: true, metadata: true },
+  const res: any = await prisma.$runCommandRaw({
+    find: 'Transaction',
+    filter: { guardId: { $oid: guardMongoId }, type: 'TIP', createdAt: { $gte: { $date: since.toISOString() } } },
+    sort: { createdAt: -1 },
+    limit: 500,
+    batchSize: 500,
+    projection: { reference: 1, status: 1, amount: 1, description: 1, failureReason: 1, createdAt: 1, metadata: 1 },
   })
-  return rows as TipRow[]
+  return (res?.cursor?.firstBatch || []).map((d: any) => ({
+    id: plain(d._id),
+    reference: d.reference ?? null,
+    status: d.status ?? null,
+    amount: Number(plain(d.amount) ?? 0),
+    description: d.description ?? null,
+    failureReason: d.failureReason ?? null,
+    createdAt: asDate(d.createdAt),
+    metadata: plain(d.metadata) ?? null,
+  }))
 }
 
 /**
