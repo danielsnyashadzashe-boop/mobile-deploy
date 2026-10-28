@@ -1071,10 +1071,8 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
             row.explanation = `${why ? `The payment did not go through: ${why}.` : 'The payment did not go through.'} No money was taken from the customer and nothing was added to your balance.`
             row.paymentMethod = (meta.paymentMethod as string) || null
           } else if (t.type === 'TIP' && status === 'COMPLETED') {
-            const fee = Number(meta.commissionAmount || 0)
-            row.explanation = fee > 0
-              ? `Customer tipped R${Number(meta.originalAmount ?? t.amount + fee).toFixed(2)}. R${fee.toFixed(2)} fee, R${t.amount.toFixed(2)} added to your balance.`
-              : `R${t.amount.toFixed(2)} added to your balance.`
+            // Only what the CTA got.
+            row.explanation = `R${t.amount.toFixed(2)} added to your balance.`
           }
           return row
         }), ...unpaid.map(a => {
@@ -1111,7 +1109,7 @@ router.get('/mobile/me/transactions', mobileAuth, async (req: Request, res: Resp
     })
   } catch (error) {
     console.error('❌ Error fetching transactions:', error)
-    return res.status(500).json({ success: false, error: 'Failed to fetch transactions' })
+    return res.status(500).json({ success: false, error: 'Failed to fetch transactions', detail: String((error as Error)?.message || error).slice(0, 300) })
   }
 })
 
@@ -1159,7 +1157,7 @@ router.get('/mobile/me/tip-activity', mobileAuth, async (req: Request, res: Resp
     })
   } catch (error) {
     console.error('❌ Error fetching tip activity:', error)
-    return res.status(500).json({ success: false, error: 'Failed to fetch tip activity' })
+    return res.status(500).json({ success: false, error: 'Failed to fetch tip activity', detail: String((error as Error)?.message || error).slice(0, 300) })
   }
 })
 

@@ -36,17 +36,17 @@ interface TipRow { id: string; reference: string | null; status: string | null; 
 const asDate = (v: any): Date => new Date(v && typeof v === 'object' && '$date' in v ? (typeof v.$date === 'object' ? Number(v.$date.$numberLong) : v.$date) : v)
 
 async function readAttemptEvents(guardPublicId: string, since: Date) {
-  const res: any = await prisma.$runCommandRaw({
-    find: 'ActivityLog',
-    filter: { entityType: QR_TEST_ENTITY, entityName: guardPublicId, timestamp: { $gte: { $date: since.toISOString() } } },
-    sort: { timestamp: 1 },
-    limit: 2000,
-    projection: { entityId: 1, timestamp: 1, metadata: 1, errorMessage: 1, userAgent: 1 },
+  // A normal query, not a raw command: the raw command failed on the live server.
+  const docs = await prisma.activityLog.findMany({
+    where: { entityType: QR_TEST_ENTITY, entityName: guardPublicId, timestamp: { gte: since } },
+    orderBy: { timestamp: 'asc' },
+    take: 2000,
+    select: { entityId: true, timestamp: true, metadata: true, errorMessage: true, userAgent: true },
   })
-  const docs: any[] = res?.cursor?.firstBatch || []
   const byAttempt = new Map<string, AttemptEvent[]>()
   for (const d of docs) {
-    const m = d.metadata || {}
+    if (!d.entityId || !d.timestamp) continue
+    const m = (d.metadata as Record<string, any>) || {}
     const list = byAttempt.get(d.entityId) || []
     list.push({ at: asDate(d.timestamp), kind: m.kind, amount: m.amount || null, reference: m.reference || null, reason: d.errorMessage || null, source: m.source || 'PHONE', device: d.userAgent || null })
     byAttempt.set(d.entityId, list)
@@ -137,9 +137,9 @@ function explain(status: AttemptStatus, a: { amount: string | null; reason: stri
   const ref = a.ref ? ` Reference ${a.ref}.` : ''
   switch (status) {
     case 'SUCCESS': {
+      // Only what the CTA got.
       const got = a.tip?.metadata?.guardReceivesAmount ?? a.tip?.amount
-      const fee = Number(a.tip?.metadata?.commissionAmount || 0)
-      return fee > 0 ? `Confirmed. ${rand(got)} is on your balance (${rand(a.amount)} tip less ${rand(fee)} fee).` : `Confirmed. ${rand(got ?? a.amount)} is on your balance.`
+      return `Confirmed. ${rand(got ?? a.amount)} is on your balance.`
     }
     case 'PENDING':
       return a.reason === 'Paying on Netcash now'

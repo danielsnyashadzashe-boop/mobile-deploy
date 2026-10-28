@@ -144,7 +144,6 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
       : baseIcon;
 
   const isIncome = item.amount > 0;
-  const hasCommission = (item as any).metadata?.commissionAmount > 0;
   const reason = item.explanation || item.failureReason || 'Payment didn\'t go through';
   const pending = isPending(item);
   const pill = item.status === 'REVERSED' ? 'Reversed' : item.status === 'NOT_COMPLETED' ? 'Not completed' : 'Failed';
@@ -266,13 +265,6 @@ function TxRow({ item, index }: { item: Transaction; index: number }) {
 
         {(item as any).reference && (
           <Text style={hStyles.txRef}>Ref: {(item as any).reference}</Text>
-        )}
-        {!failed && !unconfirmed && hasCommission && !item.explanation && (
-          <View style={hStyles.commissionBadge}>
-            <Text style={hStyles.commissionText}>
-              {(item as any).metadata.commissionRate}% commission · received {formatCurrency((item as any).metadata.guardReceivesAmount)}
-            </Text>
-          </View>
         )}
       </View>
     </Reanimated.View>
@@ -837,8 +829,6 @@ const hStyles = StyleSheet.create({
   reasonBox:    { flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, backgroundColor: '#FEF2F2', borderRadius: 8, padding: 8 },
   reasonText:   { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#B91C1C', flex: 1, lineHeight: 16 },
 
-  commissionBadge:{ marginTop: 6, backgroundColor: '#EFF6FF', borderRadius: 8, padding: 6 },
-  commissionText: { fontSize: 11, fontFamily: 'Nunito-Regular', color: '#1D4ED8' },
 
   // Spinner
   spinnerWrap:  { alignItems: 'center', justifyContent: 'center', paddingVertical: 64 },
